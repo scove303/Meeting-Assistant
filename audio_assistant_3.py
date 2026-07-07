@@ -31,9 +31,18 @@ log.setLevel(logging.ERROR)
 
 # ===================== CẤU HÌNH =====================
 # API Keys
-GROQ_API_KEY = "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" 
+GROQ_API_KEYS = [
+    "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",
+    "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",
+    "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",
+]
 GEMINI_API_KEY = 'AIzaSyBG8PO_PjKFQc2oQI2GOiVGp5STu3bzAAs' 
-GEMINI_MODEL = 'gemini-flash-lite-latest' 
+GEMINI_MODEL = 'gemini-3-flash-preview' 
+
+# (Tuỳ chọn) Mathpix API dùng để đọc công thức toán học siêu chính xác
+# Lấy key tại: https://mathpix.com/
+MATHPIX_APP_ID = ""
+MATHPIX_APP_KEY = ""
 
 MOBILE_PORT = 5001
 
@@ -56,6 +65,8 @@ QUY TẮC HIỂN THỊ (BẮT BUỘC):
 2. Công thức: Dùng LaTeX. Inline là $...$, Block (xuống dòng) là $$...$$.
 3. Phong cách: Đi thẳng vào vấn đề. KHÔNG chào hỏi, KHÔNG mở bài/kết bài lan man. KHÔNG giải thích dông dài văn tự.
 4. Cấu trúc bài giải: Chia thành các bước rõ ràng. Mỗi bước phải tuân theo format sau:
+   ### Bước Đọc Đề (Nếu giải từ ảnh): 
+   - Viết lại/Phiên âm chính xác 100% công thức, ma trận, hoặc đề bài toán có trong ảnh ra LaTeX để chắc chắn không nhìn nhầm.
    ### Bước [n]: [Tên hành động cụ thể]
    - Giải thích: [Lý do ngắn gọn - chỉ 1 câu, nếu cần thiết]
    - Thực hiện: [Trình bày phép tính/biến đổi]
@@ -324,10 +335,41 @@ class SystemAudioControl:
         self.server = AudioMobileServer(self)
 
     def setup_groq(self):
+        self.current_groq_key_index = 0
         try:
-            self.client = Groq(api_key=GROQ_API_KEY)
+            self.client = Groq(api_key=GROQ_API_KEYS[self.current_groq_key_index])
         except Exception as e:
             print(f"Groq Init Error: {e}")
+
+    def _call_mathpix(self, img_b64):
+        """Gọi Mathpix API để OCR toán học siêu chuẩn"""
+        if not MATHPIX_APP_ID or not MATHPIX_APP_KEY:
+            return None
+        try:
+            headers = {
+                "app_id": MATHPIX_APP_ID,
+                "app_key": MATHPIX_APP_KEY,
+                "Content-Type": "application/json"
+            }
+            payload = {
+                "src": f"data:image/jpeg;base64,{img_b64}",
+                "formats": ["text"]
+            }
+            resp = requests.post("https://api.mathpix.com/v3/text", json=payload, headers=headers, timeout=15)
+            if resp.status_code == 200:
+                return resp.json().get("text", "")
+        except Exception as e:
+            if self.debug_mode_var.get():
+                print(f"Mathpix Error: {e}")
+        return None
+
+    def switch_groq_key(self):
+        if len(GROQ_API_KEYS) > 1:
+            self.current_groq_key_index = (self.current_groq_key_index + 1) % len(GROQ_API_KEYS)
+            print(f"🔄 Đã đổi sang Groq API Key khác (Index: {self.current_groq_key_index})")
+            self.client = Groq(api_key=GROQ_API_KEYS[self.current_groq_key_index])
+            return True
+        return False
 
     def setup_ui(self):
         self.root = tk.Tk()
@@ -635,44 +677,90 @@ class SystemAudioControl:
             img.save(buffered, format="JPEG", quality=encode_quality)
             img_b64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
 
-            # Gọi Gemini API
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+            # Kiểm tra xem có dùng Mathpix không
+            mathpix_text = self._call_mathpix(img_b64)
             
-            # --- PHẦN SỬA ĐỔI: TẠO PROMPT THÔNG MINH ---
-            # 1. Lấy yêu cầu thực tế của user (nếu có gõ văn bản trước khi bấm phím tắt)
-            user_query = "Hãy đọc và giải quyết yêu cầu/câu hỏi có trong ảnh này."
-            if self.conversation_history:
-                last_msg = self.conversation_history[-1]
-                if last_msg['role'] == 'user':
-                    user_query = last_msg['content']
+            if mathpix_text:
+                if self.debug_mode_var.get():
+                    print(f"🧮 Mathpix OCR thành công: {mathpix_text}")
+                
+                # Chuyển qua Groq (Llama) xử lý text thay vì dùng Gemini
+                self.root.after(0, lambda: self.status_lbl.config(text="🔄 Mathpix OCR Success, Solving...", fg='#569cd6'))
+                
+                prompt = (
+                    f"Tôi đã scan một hình ảnh toán học và đây là kết quả đọc được từ ảnh (định dạng LaTeX):\n"
+                    f"```latex\n{mathpix_text}\n```\n\n"
+                    f"YÊU CẦU TỪ NGƯỜI DÙNG: {user_query}\n\n"
+                    f"Hãy thực hiện yêu cầu trên theo đúng luật của bạn."
+                )
+                
+                # Gọi thẳng Groq bằng cơ chế text
+                messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+                messages.extend(self.conversation_history)
+                messages.append({"role": "user", "content": prompt})
+                
+                answer = ""
+                max_retries = len(GROQ_API_KEYS)
+                for attempt in range(max_retries):
+                    try:
+                        resp = self.client.chat.completions.create(
+                            model="llama-3.3-70b-versatile",
+                            messages=messages,
+                            temperature=0.7,
+                            max_tokens=4096
+                        )
+                        answer = resp.choices[0].message.content
+                        break
+                    except Exception as e:
+                        err_str = str(e).lower()
+                        if 'rate limit' in err_str or '429' in err_str or 'token' in err_str or 'insufficient' in err_str:
+                            if attempt < max_retries - 1 and self.switch_groq_key():
+                                continue
+                        raise e
+            else:
+                # Dùng Gemini làm Fallback (Cách cũ) nhưng CẢI TIẾN PROMPT (CoT)
+                final_prompt = (
+                    f"Dưới đây là các quy tắc và vai trò bạn phải tuân thủ:\n{SYSTEM_PROMPT}\n\n"
+                    f"YÊU CẦU CỤ THỂ: {user_query}\n\n"
+                    f"NHIỆM VỤ: Dựa trên hình ảnh đính kèm, hãy giải quyết bài toán.\n"
+                    f"CHÚ Ý QUAN TRỌNG: Trước khi giải, BẮT BUỘC phải thực hiện bước 'Đọc Đề' để phiên âm chính xác 100% các công thức toán, ma trận, biểu thức có trong ảnh thành LaTeX. Sau khi đã đọc đúng đề, mới bắt đầu giải."
+                )
 
-            # 2. Tạo Prompt tổng hợp bao gồm SYSTEM_PROMPT để ép AI tuân thủ quy tắc
-            final_prompt = (
-                f"Dưới đây là các quy tắc và vai trò bạn phải tuân thủ:\n{SYSTEM_PROMPT}\n\n"
-                f"YÊU CẦU CỤ THỂ: {user_query}\n\n"
-                f"NHIỆM VỤ: Dựa trên hình ảnh screenshot đính kèm, hãy thực hiện yêu cầu trên theo đúng các quy tắc đã nêu."
-            )
-            # ------------------------------------------
+                payload = {
+                    "contents": [{
+                        "parts": [
+                            {"text": final_prompt},
+                            {"inline_data": {"mime_type": "image/jpeg", "data": img_b64}}
+                        ]
+                    }]
+                }
 
-            payload = {
-                "contents": [{
-                    "parts": [
-                        {"text": final_prompt}, # Gửi prompt tổng hợp thay vì prompt cũ
-                        {"inline_data": {"mime_type": "image/jpeg", "data": img_b64}}
-                    ]
-                }]
-            }
+                if self.debug_mode_var.get():
+                    print(f"🤖 Đang gửi đến Gemini API...")
+                
+                max_gemini_retries = 3
+                for attempt in range(max_gemini_retries):
+                    try:
+                        response = requests.post(url, headers={'Content-Type': 'application/json'}, json=payload, timeout=45)
+                        if response.status_code == 200:
+                            break
+                        elif response.status_code in [429, 503] and attempt < max_gemini_retries - 1:
+                            if self.debug_mode_var.get():
+                                print(f"⚠️ Gemini API {response.status_code}, retrying in {2 * (attempt + 1)}s...")
+                            time.sleep(2 * (attempt + 1))
+                            continue
+                        else:
+                            raise Exception(f"Gemini API Error: {response.status_code} - {response.text}")
+                    except requests.exceptions.Timeout:
+                        if attempt < max_gemini_retries - 1:
+                            if self.debug_mode_var.get():
+                                print(f"⚠️ Gemini API Timeout, retrying in {2 * (attempt + 1)}s...")
+                            time.sleep(2 * (attempt + 1))
+                            continue
+                        raise Exception("Gemini API Timeout sau nhiều lần thử")
 
-            if self.debug_mode_var.get():
-                print(f"🤖 Đang gửi đến Gemini API...")
-            
-            response = requests.post(url, headers={'Content-Type': 'application/json'}, json=payload, timeout=30)
-            
-            if response.status_code != 200:
-                raise Exception(f"Gemini API Error: {response.status_code} - {response.text}")
-
-            result = response.json()
-            answer = result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', 'No response')
+                result = response.json()
+                answer = result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', 'No response')
 
             if self.debug_mode_var.get():
                 print(f"✅ Nhận được phản hồi từ Gemini")
@@ -737,6 +825,9 @@ class SystemAudioControl:
             # Chụp và encode
             img = ImageGrab.grab(bbox=(left, top, right, bottom))
             
+            # Copy vào clipboard
+            self._copy_to_clipboard(img)
+            
             import base64
             buffered = io.BytesIO()
             img.save(buffered, format="JPEG", quality=95)
@@ -752,30 +843,85 @@ class SystemAudioControl:
                 if last_msg['role'] == 'user':
                     user_query = last_msg['content']
 
-            # 2. Tạo Prompt tổng hợp (Ép Gemini tuân thủ SYSTEM_PROMPT)
-            # Dòng này giúp AI hiểu nó là ai và phải làm gì với cái ảnh
-            final_prompt = (
-                f"Dưới đây là hướng dẫn về vai trò và quy tắc trả lời của bạn:\n{SYSTEM_PROMPT}\n\n"
-                f"YÊU CẦU HIỆN TẠI: {user_query}\n\n"
-                f"NHIỆM VỤ: Hãy nhìn vào hình ảnh đính kèm, thực hiện yêu cầu trên theo đúng phong cách và quy tắc đã nêu."
-            )
-
-            payload = {
-                "contents": [{
-                    "parts": [
-                        {"text": final_prompt}, # Gửi prompt đã bao gồm quy tắc hệ thống
-                        {"inline_data": {"mime_type": "image/jpeg", "data": img_b64}}
-                    ]
-                }]
-            }
-
-            response = requests.post(url, headers={'Content-Type': 'application/json'}, json=payload, timeout=30)
+            # === TƯƠNG TỰ CẢI TIẾN Ở SCAN ẢNH ===
+            mathpix_text = self._call_mathpix(img_b64)
             
-            if response.status_code != 200:
-                raise Exception(f"Gemini API Error: {response.status_code} - {response.text}")
+            if mathpix_text:
+                if self.debug_mode_var.get():
+                    print(f"🧮 Mathpix OCR thành công: {mathpix_text}")
+                
+                self.root.after(0, lambda: self.status_lbl.config(text="🔄 Mathpix OCR Success, Solving...", fg='#569cd6'))
+                
+                prompt = (
+                    f"Tôi đã scan một hình ảnh toán học và đây là kết quả đọc được từ ảnh (định dạng LaTeX):\n"
+                    f"```latex\n{mathpix_text}\n```\n\n"
+                    f"YÊU CẦU TỪ NGƯỜI DÙNG: {user_query}\n\n"
+                    f"Hãy thực hiện yêu cầu trên theo đúng luật của bạn."
+                )
+                
+                messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+                messages.extend(self.conversation_history)
+                messages.append({"role": "user", "content": prompt})
+                
+                answer = ""
+                max_retries = len(GROQ_API_KEYS)
+                for attempt in range(max_retries):
+                    try:
+                        resp = self.client.chat.completions.create(
+                            model="llama-3.3-70b-versatile",
+                            messages=messages,
+                            temperature=0.7,
+                            max_tokens=4096
+                        )
+                        answer = resp.choices[0].message.content
+                        break
+                    except Exception as e:
+                        err_str = str(e).lower()
+                        if 'rate limit' in err_str or '429' in err_str or 'token' in err_str or 'insufficient' in err_str:
+                            if attempt < max_retries - 1 and self.switch_groq_key():
+                                continue
+                        raise e
+            else:
+                # Gemini Fallback với Chain of Thought Prompt
+                final_prompt = (
+                    f"Dưới đây là hướng dẫn về vai trò và quy tắc trả lời của bạn:\n{SYSTEM_PROMPT}\n\n"
+                    f"YÊU CẦU HIỆN TẠI: {user_query}\n\n"
+                    f"NHIỆM VỤ: Dựa trên hình ảnh đính kèm, hãy giải quyết bài toán.\n"
+                    f"CHÚ Ý QUAN TRỌNG: Trước khi giải, BẮT BUỘC phải thực hiện bước 'Đọc Đề' để phiên âm chính xác 100% các công thức toán, ma trận, biểu thức có trong ảnh thành LaTeX. Sau khi đã đọc đúng đề, mới bắt đầu giải."
+                )
 
-            result = response.json()
-            answer = result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', 'No response')
+                payload = {
+                    "contents": [{
+                        "parts": [
+                            {"text": final_prompt},
+                            {"inline_data": {"mime_type": "image/jpeg", "data": img_b64}}
+                        ]
+                    }]
+                }
+
+                max_gemini_retries = 3
+                for attempt in range(max_gemini_retries):
+                    try:
+                        response = requests.post(url, headers={'Content-Type': 'application/json'}, json=payload, timeout=45)
+                        if response.status_code == 200:
+                            break
+                        elif response.status_code in [429, 503] and attempt < max_gemini_retries - 1:
+                            if self.debug_mode_var.get():
+                                print(f"⚠️ Gemini API {response.status_code}, retrying in {2 * (attempt + 1)}s...")
+                            time.sleep(2 * (attempt + 1))
+                            continue
+                        else:
+                            raise Exception(f"Gemini API Error: {response.status_code} - {response.text}")
+                    except requests.exceptions.Timeout:
+                        if attempt < max_gemini_retries - 1:
+                            if self.debug_mode_var.get():
+                                print(f"⚠️ Gemini API Timeout, retrying in {2 * (attempt + 1)}s...")
+                            time.sleep(2 * (attempt + 1))
+                            continue
+                        raise Exception("Gemini API Timeout sau nhiều lần thử")
+
+                result = response.json()
+                answer = result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', 'No response')
 
             # Cập nhật trạng thái
             self.root.after(0, lambda: self.status_lbl.config(text="✅ Scan Complete", fg='#4ec9b0'))
@@ -828,19 +974,32 @@ class SystemAudioControl:
             self.server.emit_start()
 
             full_answer = ""
-            stream = self.client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=messages,
-                temperature=0.7,
-                max_tokens=4096,
-                stream=True
-            )
+            max_retries = len(GROQ_API_KEYS)
+            for attempt in range(max_retries):
+                try:
+                    stream = self.client.chat.completions.create(
+                        model="llama-3.3-70b-versatile",
+                        messages=messages,
+                        temperature=0.7,
+                        max_tokens=4096,
+                        stream=True
+                    )
 
-            for chunk in stream:
-                delta = chunk.choices[0].delta.content
-                if delta:
-                    full_answer += delta
-                    self.server.emit_chunk(delta)
+                    for chunk in stream:
+                        delta = chunk.choices[0].delta.content
+                        if delta:
+                            full_answer += delta
+                            self.server.emit_chunk(delta)
+                    break # Success
+                except Exception as e:
+                    err_str = str(e).lower()
+                    if 'rate limit' in err_str or '429' in err_str or 'token' in err_str or 'insufficient' in err_str:
+                        if attempt < max_retries - 1 and self.switch_groq_key():
+                            retry_msg = "\n\n*[⚠️ API Key hiện tại đã hết token, đang tự động đổi Key khác...]*\n\n"
+                            full_answer += retry_msg
+                            self.server.emit_chunk(retry_msg)
+                            continue
+                    raise e
 
             # Lưu lại câu trả lời
             self.conversation_history.append({"role": "assistant", "content": full_answer})
@@ -923,6 +1082,39 @@ class SystemAudioControl:
                 self.text_area.insert(tk.END, line + '\n', 'normal_text')
 
     # === CORE HELPERS ===
+    def _copy_to_clipboard(self, img):
+        """Sao chép ảnh vào Clipboard của Windows"""
+        try:
+            import tempfile
+            import subprocess
+            import os
+            
+            # Lưu tạm thành file BMP để Powershell đọc (chắc chắn nhất)
+            temp_path = os.path.join(tempfile.gettempdir(), "clipboard_temp.bmp")
+            img.convert("RGB").save(temp_path, "BMP")
+            
+            ps_script = f"""
+            Add-Type -AssemblyName System.Windows.Forms;
+            $img = [System.Drawing.Image]::FromFile('{temp_path}');
+            [System.Windows.Forms.Clipboard]::SetImage($img);
+            $img.Dispose();
+            """
+            
+            CREATE_NO_WINDOW = 0x08000000
+            subprocess.run(["powershell", "-NoProfile", "-Command", ps_script], 
+                           creationflags=CREATE_NO_WINDOW)
+            
+            try:
+                os.remove(temp_path)
+            except:
+                pass
+                
+            if self.debug_mode_var.get():
+                print("📋 Đã copy ảnh vào Clipboard bằng Powershell")
+        except Exception as e:
+            if self.debug_mode_var.get():
+                print(f"Lỗi khi copy vào Clipboard: {e}")
+
     def _finalize_pc_display(self, full_answer):
         self.text_area.configure(state='normal')
         try:
@@ -1048,11 +1240,23 @@ class SystemAudioControl:
             buffer.seek(0) 
 
             # Whisper
-            transcription = self.client.audio.transcriptions.create(
-                file=(buffer.name, buffer.read()), model="whisper-large-v3-turbo", 
-                response_format="json", language="vi", temperature=0.0 
-            )
-            text = transcription.text.strip()
+            text = ""
+            max_retries = len(GROQ_API_KEYS)
+            for attempt in range(max_retries):
+                try:
+                    transcription = self.client.audio.transcriptions.create(
+                        file=(buffer.name, buffer.read()), model="whisper-large-v3-turbo", 
+                        response_format="json", language="vi", temperature=0.0 
+                    )
+                    text = transcription.text.strip()
+                    break
+                except Exception as e:
+                    err_str = str(e).lower()
+                    if 'rate limit' in err_str or '429' in err_str or 'token' in err_str or 'insufficient' in err_str:
+                        if attempt < max_retries - 1 and self.switch_groq_key():
+                            buffer.seek(0)
+                            continue
+                    raise e
             
             if not text: 
                 self.root.after(0, lambda: self.update_result("", no_audio=True))
@@ -1131,7 +1335,7 @@ def on_release(key):
         app.finish_screenshot()
 
 if __name__ == "__main__":
-    if "gsk_" not in GROQ_API_KEY: print("⚠️ Check Groq Key")
+    if not any("gsk_" in key for key in GROQ_API_KEYS): print("⚠️ Check Groq Keys")
     
     # Kiểm tra admin
     if not ctypes.windll.shell32.IsUserAnAdmin():
