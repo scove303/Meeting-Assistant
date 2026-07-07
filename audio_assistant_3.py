@@ -655,6 +655,9 @@ class SystemAudioControl:
             # Chụp màn hình
             img = ImageGrab.grab(bbox=(left, top, right, bottom))
             
+            # Copy vào clipboard (Người dùng gọi cái này là 'quét')
+            self._copy_to_clipboard(img)
+            
             # Lưu file nếu auto-save bật
             filename = None
             if self.auto_save_var.get():
@@ -677,15 +680,27 @@ class SystemAudioControl:
             img.save(buffered, format="JPEG", quality=encode_quality)
             img_b64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
 
+            # Xác định URL và câu hỏi của User
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+            user_query = "Hãy đọc và giải quyết yêu cầu/câu hỏi có trong ảnh này."
+            if self.conversation_history:
+                last_msg = self.conversation_history[-1]
+                if last_msg['role'] == 'user':
+                    user_query = last_msg['content']
+
             # Kiểm tra xem có dùng Mathpix không
             mathpix_text = self._call_mathpix(img_b64)
             
+            # Mobile UI Start
+            self.server.send_user_message(f"📸 Screenshot ({width}x{height}px): {user_query}")
+            self.server.emit_start()
+
             if mathpix_text:
                 if self.debug_mode_var.get():
                     print(f"🧮 Mathpix OCR thành công: {mathpix_text}")
                 
                 # Chuyển qua Groq (Llama) xử lý text thay vì dùng Gemini
-                self.root.after(0, lambda: self.status_lbl.config(text="🔄 Mathpix OCR Success, Solving...", fg='#569cd6'))
+                self.root.after(0, lambda: self.status_lbl.config(text="🔄 Solving with Llama...", fg='#569cd6'))
                 
                 prompt = (
                     f"Tôi đã scan một hình ảnh toán học và đây là kết quả đọc được từ ảnh (định dạng LaTeX):\n"
@@ -703,21 +718,30 @@ class SystemAudioControl:
                 max_retries = len(GROQ_API_KEYS)
                 for attempt in range(max_retries):
                     try:
-                        resp = self.client.chat.completions.create(
+                        stream = self.client.chat.completions.create(
                             model="llama-3.3-70b-versatile",
                             messages=messages,
                             temperature=0.7,
-                            max_tokens=4096
+                            max_tokens=4096,
+                            stream=True
                         )
-                        answer = resp.choices[0].message.content
+                        for chunk in stream:
+                            delta = chunk.choices[0].delta.content
+                            if delta:
+                                answer += delta
+                                self.server.emit_chunk(delta)
                         break
                     except Exception as e:
                         err_str = str(e).lower()
                         if 'rate limit' in err_str or '429' in err_str or 'token' in err_str or 'insufficient' in err_str:
                             if attempt < max_retries - 1 and self.switch_groq_key():
+                                retry_msg = "\n\n*[⚠️ Đổi Key API...]*\n\n"
+                                answer += retry_msg
+                                self.server.emit_chunk(retry_msg)
                                 continue
                         raise e
             else:
+                self.root.after(0, lambda: self.status_lbl.config(text="🔄 Solving with Gemini...", fg='#569cd6'))
                 # Dùng Gemini làm Fallback (Cách cũ) nhưng CẢI TIẾN PROMPT (CoT)
                 final_prompt = (
                     f"Dưới đây là các quy tắc và vai trò bạn phải tuân thủ:\n{SYSTEM_PROMPT}\n\n"
@@ -761,30 +785,25 @@ class SystemAudioControl:
 
                 result = response.json()
                 answer = result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', 'No response')
-
-            if self.debug_mode_var.get():
-                print(f"✅ Nhận được phản hồi từ Gemini")
+                
+                if self.debug_mode_var.get():
+                    print(f"✅ Nhận được phản hồi từ Gemini")
+                
+                # Fake stream for Gemini
+                for chunk in answer.split():
+                    self.server.emit_chunk(chunk + " ")
+                    time.sleep(0.01)
 
             # Hiển thị kết quả
             self.root.after(0, lambda: self.status_lbl.config(text="✅ Screenshot Analyzed", fg='#4ec9b0'))
             
             # Format và hiển thị như bình thường
             save_info = f" [Saved: {filename}]" if filename else ""
-            # Lưu user_query gốc vào lịch sử cho sạch sẽ
             self.conversation_history.append({"role": "user", "content": f"[Screenshot {width}x{height}px]{save_info} {user_query}"})
             self.conversation_history.append({"role": "assistant", "content": answer})
             
             if len(self.conversation_history) > MAX_HISTORY * 2:
                 self.conversation_history = self.conversation_history[-MAX_HISTORY*2:]
-
-            # Mobile UI
-            self.server.send_user_message(f"📸 Screenshot ({width}x{height}px): {user_query}")
-            self.server.emit_start()
-            
-            # Stream to mobile
-            for chunk in answer.split():
-                self.server.emit_chunk(chunk + " ")
-                time.sleep(0.01)
             
             html_answer = self.markdown_to_html(answer)
             self.server.emit_finish(html_answer)
@@ -836,21 +855,25 @@ class SystemAudioControl:
             # === CALL GEMINI API ===
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
             
-            # 1. Xác định câu hỏi của User (giữ nguyên logic lấy tin nhắn cuối)
+            # Xác định câu hỏi của User
             user_query = "Hãy đọc và giải quyết yêu cầu/câu hỏi có trong ảnh này."
             if self.conversation_history:
                 last_msg = self.conversation_history[-1]
                 if last_msg['role'] == 'user':
                     user_query = last_msg['content']
 
-            # === TƯƠNG TỰ CẢI TIẾN Ở SCAN ẢNH ===
+            # Gọi Mathpix OCR
             mathpix_text = self._call_mathpix(img_b64)
-            
+
+            # === MOBILE RESPONSE START ===
+            self.server.send_user_message(f"📸 Image Scan: {user_query}")
+            self.server.emit_start()
+
             if mathpix_text:
                 if self.debug_mode_var.get():
                     print(f"🧮 Mathpix OCR thành công: {mathpix_text}")
                 
-                self.root.after(0, lambda: self.status_lbl.config(text="🔄 Mathpix OCR Success, Solving...", fg='#569cd6'))
+                self.root.after(0, lambda: self.status_lbl.config(text="🔄 Solving with Llama...", fg='#569cd6'))
                 
                 prompt = (
                     f"Tôi đã scan một hình ảnh toán học và đây là kết quả đọc được từ ảnh (định dạng LaTeX):\n"
@@ -867,21 +890,30 @@ class SystemAudioControl:
                 max_retries = len(GROQ_API_KEYS)
                 for attempt in range(max_retries):
                     try:
-                        resp = self.client.chat.completions.create(
+                        stream = self.client.chat.completions.create(
                             model="llama-3.3-70b-versatile",
                             messages=messages,
                             temperature=0.7,
-                            max_tokens=4096
+                            max_tokens=4096,
+                            stream=True
                         )
-                        answer = resp.choices[0].message.content
+                        for chunk in stream:
+                            delta = chunk.choices[0].delta.content
+                            if delta:
+                                answer += delta
+                                self.server.emit_chunk(delta)
                         break
                     except Exception as e:
                         err_str = str(e).lower()
                         if 'rate limit' in err_str or '429' in err_str or 'token' in err_str or 'insufficient' in err_str:
                             if attempt < max_retries - 1 and self.switch_groq_key():
+                                retry_msg = "\n\n*[⚠️ Đổi Key API...]*\n\n"
+                                answer += retry_msg
+                                self.server.emit_chunk(retry_msg)
                                 continue
                         raise e
             else:
+                self.root.after(0, lambda: self.status_lbl.config(text="🔄 Solving with Gemini...", fg='#569cd6'))
                 # Gemini Fallback với Chain of Thought Prompt
                 final_prompt = (
                     f"Dưới đây là hướng dẫn về vai trò và quy tắc trả lời của bạn:\n{SYSTEM_PROMPT}\n\n"
@@ -922,6 +954,11 @@ class SystemAudioControl:
 
                 result = response.json()
                 answer = result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', 'No response')
+                
+                # Stream từng từ cho Gemini Fallback
+                for chunk in answer.split():
+                    self.server.emit_chunk(chunk + " ")
+                    time.sleep(0.01)
 
             # Cập nhật trạng thái
             self.root.after(0, lambda: self.status_lbl.config(text="✅ Scan Complete", fg='#4ec9b0'))
@@ -932,15 +969,6 @@ class SystemAudioControl:
             
             if len(self.conversation_history) > MAX_HISTORY * 2:
                 self.conversation_history = self.conversation_history[-MAX_HISTORY*2:]
-
-            # === MOBILE RESPONSE ===
-            self.server.send_user_message(f"📸 Image Scan: {user_query}")
-            self.server.emit_start()
-            
-            # Stream từng từ
-            for chunk in answer.split():
-                self.server.emit_chunk(chunk + " ")
-                time.sleep(0.01)
             
             html_answer = self.markdown_to_html(answer)
             self.server.emit_finish(html_answer)
