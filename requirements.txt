@@ -1,0 +1,10 @@
+pyaudio
+numpy
+pynput
+groq
+pyautogui
+pillow
+requests
+mouse
+flask
+flask-socketio

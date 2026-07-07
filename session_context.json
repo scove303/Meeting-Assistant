@@ -1,0 +1,7 @@
+{
+    "subject": "CEA201x_1.1_VN Tổ chức và kiến trúc máy tính",
+    "current_topic": "Vừa giải bài tập Vision",
+    "last_vision_content": "Vấn đề bạn đang gặp phải liên quan đến lỗi giao tiếp hệ thống, được xác định là lỗi **429 (Rate Limit Exceeded)** trong quá trình thiết lập kết nối thiết bị (dù hình ảnh hiển thị các lỗi liên quan đến `SocketIO` và `render_template_string` của framework web).\n\nDưới đây là các bước giải quyết để chuyển trạng thái sang \"Hệ thống sẵn sàng\" và kết nối thiết bị thành công:\n\n### 1. Kết nối thiết bị (Xử lý trạng thái \"Hệ thống sẵn sàng\")\n\nLỗi 429 xảy ra khi hệ thống của bạn gửi quá nhiều yêu cầu (request) đến máy chủ trong một khoảng thời gian ngắn, khiến máy chủ tạm thời từ chối kết nối.\n\n**Bước 1: Kiểm tra và ổn định kết nối mạng**\n\nĐảm bảo rằng thiết bị đang sử dụng có kết nối Internet ổn định và băng thông đủ. Mất kết nối hoặc kết nối chập chờn có thể khiến các yêu cầu bị lặp lại liên tục, dẫ",
+    "last_audio_content": "Mô tả hệ thống phát hiện tấn công IDS",
+    "mode": "learning"
+}
