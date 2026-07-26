@@ -21,6 +21,13 @@ import requests
 import time
 import mouse  # Thêm thư viện mouse cho screenshot
 
+# --- MATPLOTLIB CHO LATEX RENDERING ---
+import matplotlib
+matplotlib.use('Agg')  # Backend không cần GUI
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+from matplotlib import mathtext as mtext
+
 # --- THƯ VIỆN WEB SERVER ---
 from flask import Flask, render_template_string, request
 from flask_socketio import SocketIO, emit
@@ -56,117 +63,157 @@ if not os.path.exists(SCREENSHOT_SAVE_PATH):
 
 # PLACEHOLDER SYSTEM PROMPT
 SYSTEM_PROMPT = r"""
-Bạn là một trợ lý Toán học và Khoa học chuyên nghiệp, chuyên về Đại số tuyến tính và các kiến thức cơ bản.
+Bạn là một trợ lý giải Toán theo phong cách "Visual Note" (Ghi chú trực quan).
+Đối tượng: Học sinh lớp 12 mất gốc, hay quên công thức.
 
-MỤC TIÊU: Giải quyết bài toán một cách trực quan, ngắn gọn, dễ hiểu và tuân thủ nghiêm ngặt định dạng hiển thị.
+MỤC TIÊU:
+Tối đa hóa khả năng "nhìn lướt" (scannability). KHÔNG viết đoạn văn. KHÔNG giải thích dông dài. Chỉ dùng từ khóa, công thức và ký hiệu.
 
-QUY TẮC HIỂN THỊ (BẮT BUỘC):
-1. Ngôn ngữ: 100% Tiếng Việt.
-2. Công thức: Dùng LaTeX. Inline là $...$, Block (xuống dòng) là $$...$$.
-3. Phong cách: Đi thẳng vào vấn đề. KHÔNG chào hỏi, KHÔNG mở bài/kết bài lan man. KHÔNG giải thích dông dài văn tự.
-4. Cấu trúc bài giải: Chia thành các bước rõ ràng. Mỗi bước phải tuân theo format sau:
-   ### Bước Đọc Đề (Nếu giải từ ảnh): 
-   - Viết lại/Phiên âm chính xác 100% công thức, ma trận, hoặc đề bài toán có trong ảnh ra LaTeX để chắc chắn không nhìn nhầm.
-   ### Bước [n]: [Tên hành động cụ thể]
-   - Giải thích: [Lý do ngắn gọn - chỉ 1 câu, nếu cần thiết]
-   - Thực hiện: [Trình bày phép tính/biến đổi]
-5. Kết quả: Bắt buộc ghi dòng cuối cùng là: **Kết quả: [Đáp án]**
+QUY TẮC HIỂN THỊ (NGHIÊM NGẶT):
+1.  **Format**: Sử dụng cấu trúc khối, gạch đầu dòng và mũi tên ($\to, \Rightarrow, \downarrow$) thay vì lời nói.
+2.  **Công thức (Quan trọng nhất)**: Luôn để công thức trong block trích dẫn (`>`) ngay trước khi áp dụng.
+3.  **Phong cách giải**: 
+    - Dòng 1: Xác định dạng bài (Ví dụ: Dạng $0/0$, Tích phân từng phần...).
+    - Các bước: Trình bày dạng dòng chảy.
+    - Toán: Viết tường minh, không làm tắt bước thay số.
 
-QUY TẮC SƯ PHẠM (Dựa trên chuẩn đầu ra):
-1. Phạm vi kiến thức: Tập trung vào Đại số tuyến tính (Vector, Ma trận, Khử Gauss, Không gian vector, Trị riêng/Vector riêng).
-2. Phương pháp giải: 
-   - Với bài toán khó, hãy chia nhỏ thành các bước sơ cấp nhất.
-   - Ưu tiên sử dụng các phương pháp cơ bản (như khử Gauss, định nghĩa gốc) thay vì các định lý phức tạp hoặc đường tắt trừ khi được yêu cầu.
-   - Đảm bảo người mới học (level beginner) có thể hiểu được logic biến đổi.
+CẤU TRÚC BÀI LÀM:
+### 📌 [Tên dạng bài toán]
 
-VÍ DỤ MẪU VỀ CÁCH TRÌNH BÀY:
-User: Giải hệ phương trình: x + y = 3, 2x - y = 0
+> **💡 Công thức cần nhớ:**
+> [Ghi công thức tổng quát $y = f(x)...$ ở đây]
+
+**Bước [n]: [Hành động ngắn gọn]**
+$$ [Biểu thức Toán học] $$
+$\downarrow$ *[Giải thích siêu ngắn bằng 3-5 từ hoặc mũi tên]*
+$$ [Biểu thức sau biến đổi] $$
+
+---
+
+**🏁 Kết quả: [Đáp án]**
+
+VÍ DỤ MẪU (Bắt buộc làm theo style này):
+
+User: Tính $I = \int x \ln x \, dx$
+
 AI:
-### Bước 1: Viết ma trận bổ sung
-- Biểu diễn hệ dưới dạng $[A|b]$:
-$$ \left[\begin{array}{cc|c} 1 & 1 & 3 \\ 2 & -1 & 0 \end{array}\right] $$
 
-### Bước 2: Khử Gauss (Khử phần tử ở dòng 2, cột 1)
-- Lấy dòng 2 trừ đi 2 lần dòng 1 ($R_2 \leftarrow R_2 - 2R_1$):
-$$ \left[\begin{array}{cc|c} 1 & 1 & 3 \\ 0 & -3 & -6 \end{array}\right] $$
+### 📌 Tích phân từng phần
 
-### Bước 3: Tìm nghiệm từ dưới lên
-- Từ dòng 2: $-3y = -6 \Rightarrow y = 2$.
-- Thay vào dòng 1: $x + 2 = 3 \Rightarrow x = 1$.
+> **💡 Công thức:**
+> $\int u \, dv = u.v - \int v \, du$
+> (Mẹo: Nhất Lô, Nhì Đa, Tam Lượng, Tứ Mũ $\to$ Đặt $u = \ln x$)
 
-**Kết quả: $x = 1, y = 2$**
+**Bước 1: Đặt $u$ và $dv$**
 
+$$
+\begin{cases} u = \ln x \\ dv = x \, dx \end{cases}
+\Rightarrow
+\begin{cases} du = \frac{1}{x} \, dx \\ v = \frac{x^2}{2} \end{cases}
+$$
+
+**Bước 2: Thay vào công thức**
+$$ I = \underbrace{\ln x}_{u} \cdot \underbrace{\frac{x^2}{2}}_{v} - \int \underbrace{\frac{x^2}{2}}_{v} \cdot \underbrace{\frac{1}{x} \, dx}_{du} $$
+
+**Bước 3: Rút gọn và tính**
+$$ I = \frac{x^2}{2}\ln x - \frac{1}{2} \int x \, dx $$
+$\downarrow$ *Áp dụng $\int x dx = \frac{x^2}{2}$*
+$$ I = \frac{x^2}{2}\ln x - \frac{1}{2} \cdot \frac{x^2}{2} + C $$
+
+---
+
+**🏁 Kết quả: $I = \frac{x^2}{2}\ln x - \frac{x^4}{4} + C$**
 
 các chuẩn kiến thức, kỹ năng đầu ra như sau:
 
-1. Hiểu được vector
+1. Hiểu được quy tắc L'Hopistal
 
-- Hiểu được các phép toán cơ bản của vector cộng, trừ,  vector nhân vector với một số thực
+- Hiểu được quy tắc dạng 0/0
 
-2. Hiểu được các phép nâng cao như:
+- Hiểu được quy tắc dạng ∞/∞
 
-- Tổ hợp tuyến tính của vector, nhân trong (tích vô hướng), độ dài vector ánh xạ tuyến tính của vector"
+- Hiểu được các dạng khác của quy tắc L'Hopistal
 
-3. Hiểu được ánh xạ tuyến tính
+2. Hiểu được những khái niệm liên quan đến phương trình tham số như:
 
-- Hiểu được nguyên lý quy nạp
+- Phương trình tham số của quỹ đạo
 
-- Hiểu được anh xạ tuyến tính được biểu diễn dưới dạng ma trận"
+- Hệ số góc của đường cong
 
-4. Nắm dược các khái niệm cơ bản của ma trận như:
+- Vị trí và vận tốc, gia tốc
 
-- Ma trận 0, 
+3. Hiểu được những khái niệm liên quan đến ứng dụng của đạo hàm như:
 
-- Ma trận đơn vị, 
+- Tốc độ, quãng đường đi được của vật thể
 
-- Ma trận chéo, 
+- Đạo hàm cấp 2 và tính lồi lõm của hàm số
 
-- Ma trận tam giác, 
+- Gia tốc của vật trong chuyển động
 
-- Ma trận chuyển vị, 
+4. Nắm được các khái niệm về chuỗi số:
 
-- Ma trận đối xứng
+- Nắm được khái niệm cơ bản về dãy số
 
-5. Hiểu được các phép toán của ma trận như:
+- Nắm được khái niệm cơ bản của chuỗi số, thế nào là chuỗi hội tụ và phân kỳ
 
-- Nhân ma trận với một số
+5. Nắm được cách tính chất của chuỗi chẳng hạn như:
 
-- Cộng hai ma trận cùng cỡ
+- Tổng các số của một cấp số nhân
 
-6. Nắm được điều kiện để nhân ma trận với một vector, Hiểu được các nhân giữa ma trận và vector (dot product)"
+- Nắm được chuỗi mũ.
 
-7. Nắm được cách nhân ma trận chuyển vị với một vector, một ma trận tam giác với một vector, ma trận đối xứng với một vector
+6. Hiểu được khai triển Taylor và Maclaurin của một đa thức.
 
-8. Nắm được từ ánh xạ tuyến tính đến nhân ma trận với ma trận
+7. Hiểu được các cách xác định tính hội tụ của chuỗi:
 
-9. Hiểu được điều kiện và thực hiện phép nhân hai ma trận
+- Kiểm tra tính hội tụ của chuỗi đan dấu
 
-10. Hiểu được cách phân chia một ma trận thành nhiều ma trận con để thực hiện phép nhân
+-Kiểm tra tính hội tụ bằng phương pháp phân
 
-11. Hiểu dược khử Gauss, thêm ma trận vào bên phải, biến đổi Gauss đồng thời cả hai ma trận
+8. Hiểu được cách xác định độ sai số khi khai triển chuỗi
 
-12. Hiểu được cách giải phương trình ma trận Ax = b bằng khử Gauss (đưa ma trận về dạng tam giác trên và tam giác dưới)
+9. Vận dụng tính chất của chuỗi trong việc như:
 
-13. Hiểu khử Gauss để tìm ma trận nghịch đảo
+- Tính đạo hàm và tích phân
 
-14. Hiểu được giải phương trình Ax = b bằng cách tìm ma trận nghịch đảo
+- Các tính toán thông thường của hàm số
 
-15. Nắm được các khái niệm về không gian vector như:
+- Khai triển bằng phương pháp thay thế
 
-- Không gian con, không gian cột, không gian Null"
+10. Nắm được công thức độ dài cung
 
-16. Hiểu được span, độc lập tuyến tính, cơ sở của không gian con, số chiều của không gian con
+- Công thức độ dài cung
 
-17. Hiểu thêm về không gian vector như: 
+- Độ dài cung của phương trình tham số trong tọa độ cực
 
-- Vector trực giao và không gian trực giao
+11. Hiểu được phương pháp Euler
 
-- Hiểu được lời giải gần đúng bằng phương pháp bình phương tối thiểu"
+- Hiểu cách tính phương trình tiếp tuyến tại một điểm
 
-18. Nắm được phép chiếu vector xuống một không gian con, cơ sở trực chuẩn, chuyển đổi cơ sở
+- Hiểu được các khai triển gần đúng tuyến tính của một phương trình tại một điểm
 
-19. Nắm được khái niệm về trị riêng, vector riêng và các bài toán liên quan
-"""
+- Giải gần đúng phương trình vi phân bằng phương pháp số
+
+12. Hiểu được tích phân suy rộng định nghĩa, ví dụ
+
+13. Hiểu được các phương pháp kiểm tra tính hội tụ của tích phân suy rộng
+
+14. Hiểu được kỹ thuật tính tích phân ở dạng phân số
+
+- Tính tích phân ở dạng phân số
+
+- Giải phương trình vi phân ở dạng đa thức
+
+15. Hiểu được kỹ thuật tính tích phân từng phần
+
+16. Hiểu được hàm trong tọa độ cực
+
+- Hệ sộ góc trong tọa độ cực
+
+- Diện tích của vùng giới hạn bởi 1 đường trong tọa độ cực
+
+- Diện tích của vùng giới hạn bởi hơn 1 đường trong tọa độ cực
+  """
 
 # Audio Config
 CHUNK = 8192
@@ -326,6 +373,9 @@ class SystemAudioControl:
         self.system_frames = []
         self.mic_frames = []
         self.conversation_history = []
+        
+        # Giữ tham chiếu đến PhotoImage để tránh garbage collection
+        self.photo_images = []
         
         # === VARIABLES CHO CẤU HÌNH ẢNH ===
         self.scan_w_var = None
@@ -583,6 +633,7 @@ class SystemAudioControl:
     def clear_chat(self):
         """Xóa toàn bộ chat history"""
         self.conversation_history = []
+        self.photo_images.clear()  # Giải phóng bộ nhớ ảnh LaTeX
         self.text_area.configure(state='normal')
         self.text_area.delete('1.0', tk.END)
         self.text_area.insert(tk.END, "🧹 Chat cleared. Memory reset.\n", 'ai_tag')
@@ -1069,45 +1120,236 @@ class SystemAudioControl:
         
         return html
 
+    # === LATEX RENDERING ===
+    def render_latex_image(self, latex_str, display=False):
+        """
+        Render LaTeX thanh anh PNG bang matplotlib mathtext.
+        Tra ve tk.PhotoImage hoac None neu loi.
+        """
+        try:
+            expr = latex_str.strip()
+            if not expr:
+                return None
+            
+            fontsize = 22 if display else 16
+            dpi = 150
+            bg_color = '#1e1e1e'
+            bg_rgb = (30, 30, 30)  # #1e1e1e tuong duong
+            
+            # Render vao figure lon
+            fig, ax = plt.subplots(figsize=(20, 3))
+            fig.patch.set_facecolor(bg_color)
+            ax.set_axis_off()
+            ax.set_facecolor(bg_color)
+            ax.text(
+                0.5, 0.5, f'${expr}$',
+                fontsize=fontsize, color='#e8c77a',
+                ha='center', va='center',
+                transform=ax.transAxes, usetex=False
+            )
+            buf = io.BytesIO()
+            fig.savefig(buf, format='png', dpi=dpi,
+                        facecolor=bg_color, edgecolor='none')
+            plt.close(fig)
+            buf.seek(0)
+            
+            # Auto-crop bang PIL: loai bo vung nen toi
+            pil_img = Image.open(buf).convert('RGB')
+            
+            # Tao mask: pixel khac mau nen la noi dung
+            import numpy as np
+            arr = np.array(pil_img)
+            mask = ~(
+                (arr[:,:,0] == bg_rgb[0]) &
+                (arr[:,:,1] == bg_rgb[1]) &
+                (arr[:,:,2] == bg_rgb[2])
+            )
+            rows = np.any(mask, axis=1)
+            cols = np.any(mask, axis=0)
+            if not rows.any():
+                # Fallback neu khong tim thay noi dung
+                return None
+            rmin, rmax = np.where(rows)[0][[0, -1]]
+            cmin, cmax = np.where(cols)[0][[0, -1]]
+            
+            # Them padding
+            pad_px = 10 if display else 7
+            h, w = arr.shape[:2]
+            rmin = max(0, rmin - pad_px)
+            rmax = min(h - 1, rmax + pad_px)
+            cmin = max(0, cmin - pad_px)
+            cmax = min(w - 1, cmax + pad_px)
+            
+            cropped = pil_img.crop((cmin, rmin, cmax + 1, rmax + 1))
+            
+            # Scale len 2x de doc duoc tren man hinh (Tkinter hien thi 1:1 pixel)
+            scale = 2
+            new_w = cropped.width * scale
+            new_h = cropped.height * scale
+            cropped = cropped.resize((new_w, new_h), Image.LANCZOS)
+            
+            import base64
+            out_buf = io.BytesIO()
+            cropped.save(out_buf, format='PNG')
+            b64_data = base64.b64encode(out_buf.getvalue()).decode('utf-8')
+            tk_img = tk.PhotoImage(data=b64_data)
+            return tk_img
+            
+        except Exception as e:
+            try:
+                plt.close('all')
+            except:
+                pass
+            return None
+
+    def _parse_line_with_latex(self, line):
+        """
+        Parse một dòng text thành danh sách segments:
+        [('text', 'nội dung'), ('latex_inline', 'expr'), ...]
+        """
+        segments = []
+        # Pattern cho inline math: $...$ (không phải $$)
+        pattern = re.compile(r'(?<!\$)\$(?!\$)(.+?)(?<!\$)\$(?!\$)')
+        last_end = 0
+        for m in pattern.finditer(line):
+            if m.start() > last_end:
+                segments.append(('text', line[last_end:m.start()]))
+            segments.append(('latex_inline', m.group(1)))
+            last_end = m.end()
+        if last_end < len(line):
+            segments.append(('text', line[last_end:]))
+        return segments if segments else [('text', line)]
+
     def insert_formatted_text_to_pc(self, text):
-        """Insert formatted text vào PC text area"""
-        lines = text.split('\n')
-        for line in lines:
-            # Headers
-            if line.startswith('###'):
-                self.text_area.insert(tk.END, line[3:].strip() + '\n', 'header')
-            elif line.startswith('##'):
-                self.text_area.insert(tk.END, line[2:].strip() + '\n', 'header')
-            elif line.startswith('#'):
-                self.text_area.insert(tk.END, line[1:].strip() + '\n', 'header')
-            
-            # Code blocks
-            elif line.strip().startswith('```'):
-                continue
-            
-            # Bold text
-            elif '**' in line:
-                parts = re.split(r'(\*\*[^*]+\*\*)', line)
-                for part in parts:
-                    if part.startswith('**') and part.endswith('**'):
-                        self.text_area.insert(tk.END, part[2:-2], 'bold')
-                    else:
-                        self.text_area.insert(tk.END, part, 'normal_text')
-                self.text_area.insert(tk.END, '\n')
-            
-            # Inline code
-            elif '`' in line:
-                parts = re.split(r'(`[^`]+`)', line)
-                for part in parts:
-                    if part.startswith('`') and part.endswith('`'):
-                        self.text_area.insert(tk.END, part[1:-1], 'code')
-                    else:
-                        self.text_area.insert(tk.END, part, 'normal_text')
-                self.text_area.insert(tk.END, '\n')
-            
-            # Normal text
+        """Insert formatted text vào PC text area với hỗ trợ render LaTeX"""
+        
+        # Xử lý display math blocks $$...$$ trước (multiline)
+        # Tách text thành các đoạn: text thường và display math blocks
+        display_pattern = re.compile(r'\$\$(.+?)\$\$', re.DOTALL)
+        
+        # Cũng xử lý \[...\] display math
+        display_pattern2 = re.compile(r'\\\[(.+?)\\\]', re.DOTALL)
+        
+        # Thay thế các cặp \[...\] bằng $$...$$ để xử lý thống nhất
+        text = display_pattern2.sub(r'$$\1$$', text)
+        
+        # Tách thành blocks
+        parts = display_pattern.split(text)
+        # parts sẽ là: [text, math, text, math, text, ...] do split với capture group
+        
+        in_code_block = False
+        
+        for i, part in enumerate(parts):
+            if i % 2 == 1:
+                # Đây là display math ($$...$$)
+                tk_img = self.render_latex_image(part.strip(), display=True)
+                if tk_img:
+                    self.photo_images.append(tk_img)  # Giữ tham chiếu!
+                    self.text_area.insert(tk.END, '\n')
+                    self.text_area.image_create(tk.END, image=tk_img, padx=10, pady=4)
+                    self.text_area.insert(tk.END, '\n')
+                else:
+                    # Fallback: hiển thị text thô
+                    self.text_area.insert(tk.END, f'  [{part.strip()}]\n', 'code')
             else:
-                self.text_area.insert(tk.END, line + '\n', 'normal_text')
+                # Text thường — xử lý từng dòng
+                lines = part.split('\n')
+                for line in lines:
+                    stripped = line.strip()
+                    
+                    # Toggle code block
+                    if stripped.startswith('```'):
+                        in_code_block = not in_code_block
+                        continue
+                    
+                    if in_code_block:
+                        self.text_area.insert(tk.END, line + '\n', 'code')
+                        continue
+                    
+                    # Headers
+                    if line.startswith('### '):
+                        self._insert_line_with_inline_latex(line[4:].strip(), 'header')
+                        continue
+                    elif line.startswith('## '):
+                        self._insert_line_with_inline_latex(line[3:].strip(), 'header')
+                        continue
+                    elif line.startswith('# '):
+                        self._insert_line_with_inline_latex(line[2:].strip(), 'header')
+                        continue
+                    
+                    # Dòng trống
+                    if not stripped:
+                        self.text_area.insert(tk.END, '\n')
+                        continue
+                    
+                    # Separator ---
+                    if stripped in ('---', '___', '***'):
+                        self.text_area.insert(tk.END, '  ' + '─' * 36 + '\n', 'separator')
+                        continue
+                    
+                    # Dòng có bold + inline latex hỗn hợp
+                    self._insert_rich_line(line)
+
+    def _insert_line_with_inline_latex(self, line, base_tag='normal_text'):
+        """Insert một dòng có thể chứa inline $...$ LaTeX"""
+        # Xử lý bold trước
+        bold_parts = re.split(r'(\*\*[^*]+\*\*)', line)
+        for bp in bold_parts:
+            if bp.startswith('**') and bp.endswith('**'):
+                inner = bp[2:-2]
+                segs = self._parse_line_with_latex(inner)
+                for stype, sval in segs:
+                    if stype == 'latex_inline':
+                        img = self.render_latex_image(sval, display=False)
+                        if img:
+                            self.photo_images.append(img)
+                            self.text_area.image_create(tk.END, image=img, pady=1)
+                        else:
+                            self.text_area.insert(tk.END, f'${sval}$', 'bold')
+                    else:
+                        self.text_area.insert(tk.END, sval, 'bold')
+            else:
+                segs = self._parse_line_with_latex(bp)
+                for stype, sval in segs:
+                    if stype == 'latex_inline':
+                        img = self.render_latex_image(sval, display=False)
+                        if img:
+                            self.photo_images.append(img)
+                            self.text_area.image_create(tk.END, image=img, pady=1)
+                        else:
+                            self.text_area.insert(tk.END, f'${sval}$', base_tag)
+                    else:
+                        self.text_area.insert(tk.END, sval, base_tag)
+        self.text_area.insert(tk.END, '\n')
+
+    def _insert_rich_line(self, line):
+        """Insert dòng với bold, inline code, inline LaTeX"""
+        # Tách bold (**...**) và inline code (`...`) và inline math ($...$)
+        token_pattern = re.compile(
+            r'(\*\*[^*]+\*\*'           # **bold**
+            r'|`[^`]+`'                  # `code`
+            r'|(?<!\$)\$(?!\$).+?(?<!\$)\$(?!\$)'  # $inline math$
+            r')'
+        )
+        parts = token_pattern.split(line)
+        for part in parts:
+            if not part:
+                continue
+            if part.startswith('**') and part.endswith('**'):
+                self.text_area.insert(tk.END, part[2:-2], 'bold')
+            elif part.startswith('`') and part.endswith('`'):
+                self.text_area.insert(tk.END, part[1:-1], 'code')
+            elif part.startswith('$') and part.endswith('$') and len(part) > 2:
+                expr = part[1:-1]
+                img = self.render_latex_image(expr, display=False)
+                if img:
+                    self.photo_images.append(img)
+                    self.text_area.image_create(tk.END, image=img, pady=1)
+                else:
+                    self.text_area.insert(tk.END, part, 'normal_text')
+            else:
+                self.text_area.insert(tk.END, part, 'normal_text')
+        self.text_area.insert(tk.END, '\n')
 
     # === CORE HELPERS ===
     def _copy_to_clipboard(self, img):
