@@ -51,7 +51,7 @@ GEMINI_MODEL = 'gemini-3-flash-preview'
 MATHPIX_APP_ID = ""
 MATHPIX_APP_KEY = ""
 
-MOBILE_PORT = 5001
+MOBILE_PORT = 5003
 
 # Screenshot Config
 SCREENSHOT_HOTKEY = 'z'  # Sẽ kết hợp với Ctrl+Shift+Alt
@@ -277,18 +277,20 @@ MOBILE_HTML = """
         var container = document.getElementById('container');
         var currentDiv = null;
 
-        socket.on('new_user_message', function(data) { addMessage('user', data.content); });
+        socket.on('new_user_message', function(data) { addMessage('user', data.content, data.msg_id); });
 
-        socket.on('start_response', function() {
+        socket.on('start_response', function(data) {
             currentDiv = document.createElement('div');
             currentDiv.className = 'msg ai';
+            if (data && data.msg_id != null) {
+                currentDiv.dataset.msgId = data.msg_id;
+            }
             container.appendChild(currentDiv);
             window.scrollTo(0, document.body.scrollHeight);
         });
 
         socket.on('stream_chunk', function(data) {
             if (!currentDiv) return;
-            // Chỉ hiển thị text thô khi đang stream để tránh vỡ HTML
             let display = data.text.replace(/</g, "&lt;").replace(/>/g, "&gt;");
             currentDiv.innerHTML += display.replace(/\\n/g, "<br>");
             window.scrollTo(0, document.body.scrollHeight);
@@ -296,7 +298,6 @@ MOBILE_HTML = """
 
         socket.on('finish_response', function(data) {
             if (!currentDiv) return;
-            // Khi xong mới render HTML + MathJax
             currentDiv.innerHTML = data.html; 
             MathJax.typesetPromise([currentDiv]).then(() => {
                 window.scrollTo(0, document.body.scrollHeight);
@@ -306,15 +307,55 @@ MOBILE_HTML = """
         
         socket.on('clear_chat', function() { container.innerHTML = '<div class="msg ai">🧹 Memory Cleared.</div>'; });
 
+        // === SCROLL ANCHOR SYNC ===
+        let isSyncingScroll = false;
+        
+        function getTopmostMsgId() {
+            // Tìm phần tử [data-msg-id] đầu tiên đang hiển thị trong viewport
+            let allMsgs = container.querySelectorAll('[data-msg-id]');
+            let best = null;
+            for (let el of allMsgs) {
+                let rect = el.getBoundingClientRect();
+                if (rect.bottom > 0) {
+                    best = el;
+                    break;
+                }
+            }
+            return best ? parseInt(best.dataset.msgId) : null;
+        }
+
+        let scrollTimer = null;
+        window.addEventListener('scroll', function() {
+            if (isSyncingScroll) return;
+            // Debounce: chỉ gửi sau khi người dùng dừng scroll 80ms
+            clearTimeout(scrollTimer);
+            scrollTimer = setTimeout(function() {
+                let msgId = getTopmostMsgId();
+                if (msgId !== null) {
+                    socket.emit('sync_scroll_anchor', {msg_id: msgId});
+                }
+            }, 80);
+        });
+
+        socket.on('sync_scroll_anchor', function(data) {
+            isSyncingScroll = true;
+            let el = container.querySelector('[data-msg-id="' + data.msg_id + '"]');
+            if (el) {
+                el.scrollIntoView({behavior: 'instant', block: 'start'});
+            }
+            setTimeout(() => { isSyncingScroll = false; }, 150);
+        });
+
         function send() {
             var val = document.getElementById('text-input').value;
             if(val) { socket.emit('text_message', {text: val}); addMessage('user', val); document.getElementById('text-input').value = ''; }
         }
         
-        function addMessage(role, text) {
+        function addMessage(role, text, msg_id) {
             var div = document.createElement('div');
             div.className = 'msg ' + role;
-            div.innerHTML = text.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\\n/g, '<br>');
+            if (msg_id != null) div.dataset.msgId = msg_id;
+            div.innerHTML = text.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, '<br>');
             container.appendChild(div);
             window.scrollTo(0, document.body.scrollHeight);
         }
@@ -338,15 +379,24 @@ class AudioMobileServer:
             text = data.get('text', '').strip()
             if text:
                 Thread(target=self.assistant.process_text_input, args=(text,), daemon=True).start()
+                
+        @self.socketio.on('sync_scroll_anchor')
+        def handle_sync_scroll(data):
+            msg_id = data.get('msg_id')
+            if msg_id is not None and hasattr(self.assistant, 'sync_desktop_scroll'):
+                self.assistant.sync_desktop_scroll(msg_id)
         
     def run(self):
         self.socketio.run(self.app, host='0.0.0.0', port=MOBILE_PORT, allow_unsafe_werkzeug=True)
 
-    def send_user_message(self, content):
-        self.socketio.emit('new_user_message', {'content': content})
+    def send_scroll_anchor(self, msg_id):
+        self.socketio.emit('sync_scroll_anchor', {'msg_id': msg_id})
 
-    def emit_start(self):
-        self.socketio.emit('start_response')
+    def send_user_message(self, content, msg_id=None):
+        self.socketio.emit('new_user_message', {'content': content, 'msg_id': msg_id})
+
+    def emit_start(self, msg_id=None):
+        self.socketio.emit('start_response', {'msg_id': msg_id})
 
     def emit_chunk(self, text):
         self.socketio.emit('stream_chunk', {'text': text})
@@ -365,8 +415,8 @@ class SystemAudioControl:
         self.root = None
         self.is_recording = False
         self.is_processing_image = False
-        self.is_screenshot_mode = False  # Flag cho screenshot mode
-        self.screenshot_start_pos = None  # Vị trí bắt đầu screenshot
+        self.is_screenshot_mode = False
+        self.screenshot_start_pos = None
         self.stop_event = Event()
         self.audio = pyaudio.PyAudio()
         
@@ -374,9 +424,12 @@ class SystemAudioControl:
         self.mic_frames = []
         self.conversation_history = []
         
-        # Giữ tham chiếu đến PhotoImage để tránh garbage collection
         self.photo_images = []
         
+        # === SCROLL ANCHOR TRACKING ===
+        self.msg_counter = 0        # ID tăng dần cho mỗi tin nhắn
+        self.msg_anchor_map = {}    # {msg_id: tk.END char index khi insert}
+
         # === VARIABLES CHO CẤU HÌNH ẢNH ===
         self.scan_w_var = None
         self.scan_h_var = None
@@ -535,6 +588,31 @@ class SystemAudioControl:
         )
         self.text_area.pack(fill=tk.BOTH, expand=True)
 
+        self.orig_yscroll = self.text_area['yscrollcommand']
+        self.is_syncing_scroll = False
+        
+        def my_yscroll(*args):
+            self.text_area.tk.call(self.orig_yscroll, *args)
+            if not getattr(self, 'is_syncing_scroll', False) and hasattr(self, 'server') and self.server:
+                try:
+                    # Tìm dòng đang hiển thị ở đầu viewport
+                    top_index = self.text_area.index("@0,0")
+                    top_line = int(top_index.split('.')[0])
+                    # Tìm msg_id gần nhất có line <= top_line
+                    best_id = None
+                    best_line = -1
+                    for mid, mline in self.msg_anchor_map.items():
+                        if mline <= top_line and mline > best_line:
+                            best_line = mline
+                            best_id = mid
+                    if best_id is not None:
+                        self.server.send_scroll_anchor(best_id)
+                except Exception as e:
+                    if getattr(self, 'debug_mode_var', None) and self.debug_mode_var.get():
+                        print("Scroll anchor error:", e)
+                    
+        self.text_area.config(yscrollcommand=my_yscroll)
+
         # === DEFINE TAGS ===
         self.text_area.tag_config('user_tag', foreground='#4ec9b0', font=('Consolas', 10, 'bold'))
         self.text_area.tag_config('ai_tag', foreground='#569cd6', font=('Consolas', 10, 'bold'))
@@ -586,6 +664,21 @@ class SystemAudioControl:
         self.update_device_info()
         self.root.after(100, lambda: self.status_lbl.config(text="● Ready", fg='#4ec9b0'))
 
+    def sync_desktop_scroll(self, msg_id):
+        """Cuộn desktop đến đúng tin nhắn theo msg_id anchor."""
+        def _do_sync():
+            self.is_syncing_scroll = True
+            try:
+                msg_id_int = int(msg_id)
+                target_line = self.msg_anchor_map.get(msg_id_int)
+                if target_line and target_line > 0:
+                    self.text_area.see(f"{target_line}.0")
+            except Exception:
+                pass
+            self.root.after(50, lambda: setattr(self, 'is_syncing_scroll', False))
+        if self.root:
+            self.root.after(0, _do_sync)
+
     def _get_ip(self):
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -624,8 +717,12 @@ class SystemAudioControl:
         self.text_input.delete(0, tk.END)
         
         # Display user message
+        msg_id = self.msg_counter
+        self.msg_counter += 1
+        current_line = int(self.text_area.index(tk.END).split('.')[0])
+        self.msg_anchor_map[msg_id] = current_line
         self.format_and_insert("User", text)
-        self.server.send_user_message(text)
+        self.server.send_user_message(text, msg_id=msg_id)
         
         # Process
         Thread(target=self.process_text_input, args=(text,), daemon=True).start()
@@ -1050,7 +1147,13 @@ class SystemAudioControl:
 
             # Stream Response
             self.root.after(0, lambda: self.status_lbl.config(text="💬 Thinking...", fg='#569cd6'))
-            self.server.emit_start()
+            
+            # Tạo anchor cho tin AI ngay trước khi start
+            ai_msg_id = self.msg_counter
+            self.msg_counter += 1
+            # Ghi dòng sử là -1 tạm thời, sẽ update lúc finalize
+            self.msg_anchor_map[ai_msg_id] = -1
+            self.server.emit_start(msg_id=ai_msg_id)
 
             full_answer = ""
             max_retries = len(GROQ_API_KEYS)
@@ -1088,7 +1191,7 @@ class SystemAudioControl:
             self.server.emit_finish(html_answer)
 
             # Finish PC
-            self.root.after(0, lambda: self._finalize_pc_display(full_answer))
+            self.root.after(0, lambda fa=full_answer, aid=ai_msg_id: self._finalize_pc_display(fa, aid))
             self.root.after(0, lambda: self.status_lbl.config(text="● Ready", fg='#4ec9b0'))
 
         except Exception as e:
@@ -1126,28 +1229,139 @@ class SystemAudioControl:
         Chuyen doi cac ki hieu LaTeX khong duoc matplotlib ho tro
         thanh dang tuong duong de tang ti le render thanh cong.
         """
-        # \underbrace{X}_{label} -> X  (matplotlib khong ho tro underbrace)
-        expr = re.sub(r'\\underbrace\{([^}]*)\}_\{[^}]*\}', r'\1', expr)
-        expr = re.sub(r'\\underbrace\{([^}]*)\}', r'\1', expr)
-        # \overbrace tuong tu
-        expr = re.sub(r'\\overbrace\{([^}]*)\}_\{[^}]*\}', r'\1', expr)
-        # Cac mui ten / ky hieu duoc ho tro boi matplotlib mathtext
-        # (matplotlib ho tro \to, \Rightarrow, \downarrow, \uparrow, etc.)
-        # Nhung mot so bien the khong chuan can sua:
+        # Fix typo cua AI: \1n -> \ln
+        expr = expr.replace(r'\1n', r'\ln')
+        
+        # \underbrace{X}_{label} -> X (ho tro ngoac long nhau)
+        def strip_command_with_braces(text, cmd):
+            while True:
+                idx = text.find(cmd + '{')
+                if idx == -1: break
+                count = 0
+                start_content = idx + len(cmd) + 1
+                end_content = -1
+                for i in range(idx + len(cmd), len(text)):
+                    if text[i] == '{': count += 1
+                    elif text[i] == '}':
+                        count -= 1
+                        if count == 0:
+                            end_content = i
+                            break
+                if end_content != -1:
+                    content = text[start_content:end_content]
+                    suffix_end = end_content + 1
+                    if suffix_end < len(text) and text[suffix_end] in ['_', '^']:
+                        if suffix_end + 1 < len(text) and text[suffix_end+1] == '{':
+                            scount = 0
+                            for i in range(suffix_end + 1, len(text)):
+                                if text[i] == '{': scount += 1
+                                elif text[i] == '}':
+                                    scount -= 1
+                                    if scount == 0:
+                                        suffix_end = i + 1
+                                        break
+                        else:
+                            suffix_end += 2
+                    text = text[:idx] + content + text[suffix_end:]
+                else:
+                    break
+            return text
+            
+        expr = strip_command_with_braces(expr, r'\underbrace')
+        expr = strip_command_with_braces(expr, r'\overbrace')
+
+        # Cac bien the mui ten - chi thay the khi la lenh doc lap
         expr = expr.replace(r'\implies', r'\Rightarrow')
         expr = expr.replace(r'\iff',     r'\Leftrightarrow')
-        expr = expr.replace(r'\ge',      r'\geq')
-        expr = expr.replace(r'\le',      r'\leq')
-        expr = expr.replace(r'\ne',      r'\neq')
-        # \text{} -> \mathrm{} (matplotlib ho tro mathrm tot hon)
-        expr = re.sub(r'\\text\{([^}]*)\}', r'\\mathrm{\1}', expr)
-        # Xoa cac lenh khong ho tro ma co the gay loi
+        # \ge -> \geq, \le -> \leq, \ne -> \neq
+        # Dung regex de tranh thay the \left -> \leqft hay \geq -> \geqq
+        expr = re.sub(r'\\ge(?![a-zA-Z])', r'\\geq', expr)
+        expr = re.sub(r'\\le(?![a-zA-Z])', r'\\leq', expr)
+        expr = re.sub(r'\\ne(?![a-zA-Z])', r'\\neq', expr)
+        # \text{}: neu co ky tu non-ASCII (tieng Viet...) thi xoa di,
+        # neu ASCII thuan thi dung \mathrm{}
+        def _replace_text(m):
+            inner = m.group(1)
+            if any(ord(c) > 127 for c in inner):
+                return r'\;'   # chi giu khoang cach
+            return r'\mathrm{' + inner + '}'
+        expr = re.sub(r'\\text\{([^}]*)\}', _replace_text, expr)
+        # Xoa cac lenh khong ho tro
         expr = re.sub(r'\\label\{[^}]*\}', '', expr)
         expr = re.sub(r'\\tag\{[^}]*\}',   '', expr)
         expr = re.sub(r'\\nonumber',        '', expr)
         expr = re.sub(r'\\notag',           '', expr)
         # \left( \right) duoc ho tro, giu nguyen
         return expr.strip()
+
+    def _unicode_matrix(self, latex_str):
+        """
+        Parse moi truong ma tran (bmatrix, pmatrix, cases, matrix) va
+        tra ve chuoi Unicode text art, hoac None neu khong phai ma tran.
+        Ho tro nhieu ma tran/cases trong cung mot bieu thuc.
+        """
+        original_str = latex_str
+
+        def repl_cases(m):
+            content = m.group(1)
+            rows = [r.strip() for r in re.split(r'\\\\', content) if r.strip()]
+            def clean(s):
+                s = re.sub(r'\\[a-zA-Z]+', '', s)
+                s = re.sub(r'[{}]', '', s)
+                return s.strip()
+            lines = ['{ ' + clean(rows[0])] if rows else []
+            for r in rows[1:]:
+                lines.append('  ' + clean(r))
+            return '\n' + '\n'.join(lines) + '\n'
+
+        latex_str = re.sub(r'\\begin\s*\{cases\}(.*?)\\end\s*\{cases\}', repl_cases, latex_str, flags=re.DOTALL)
+
+        def repl_matrix(m):
+            env = m.group(1) or ''
+            body = m.group(2)
+            bk = {'b': ('\u23a1\u23a2\u23a3', '\u23a4\u23a5\u23a6'),
+                  'p': ('\u239b\u239c\u239d', '\u239e\u239f\u23a0'),
+                  'v': ('|', '|'), 'B': ('\u2016', '\u2016'),
+                  '' : ('',  '')}
+            lb_chars, rb_chars = bk.get(env, ('', ''))
+            rows_raw = re.split(r'\\\\', body)
+            cells = []
+            for row in rows_raw:
+                row = row.strip()
+                if not row: continue
+                cols = [c.strip() for c in row.split('&')]
+                cleaned = []
+                for c in cols:
+                    c = re.sub(r'\\frac\{([^}]*)\}\{([^}]*)\}', r'(\1)/(\2)', c)
+                    c = re.sub(r'\\[a-zA-Z]+', '', c)
+                    c = re.sub(r'[{}]', '', c)
+                    c = c.strip() or '0'
+                    cleaned.append(c)
+                cells.append(cleaned)
+            if not cells: return m.group(0)
+            ncols = max(len(r) for r in cells)
+            widths = [max((len(cells[i][j]) if j < len(cells[i]) else 0) for i in range(len(cells))) for j in range(ncols)]
+            lines = []
+            n = len(cells)
+            for i, row in enumerate(cells):
+                cols_str = '  '.join((row[j] if j < len(row) else '').center(widths[j]) for j in range(ncols))
+                if lb_chars and len(lb_chars) == 3:
+                    if n == 1: p, s = lb_chars[0], rb_chars[0]
+                    elif i == 0: p, s = lb_chars[0], rb_chars[0]
+                    elif i == n - 1: p, s = lb_chars[2], rb_chars[2]
+                    else: p, s = lb_chars[1], rb_chars[1]
+                    lines.append(f'{p} {cols_str} {s}')
+                elif lb_chars:
+                    lines.append(f'{lb_chars} {cols_str} {rb_chars}')
+                else:
+                    lines.append(f'  {cols_str}  ')
+            return '\n' + '\n'.join(lines) + '\n'
+
+        latex_str = re.sub(r'\\begin\s*\{(b|p|v|B|V|small)?matrix\}(.*?)\\end\s*\{(b|p|v|B|V|small)?matrix\}', repl_matrix, latex_str, flags=re.DOTALL)
+
+        if latex_str != original_str:
+            return latex_str.strip()
+        return None
 
     def render_latex_image(self, latex_str, display=False):
         """
@@ -1275,8 +1489,15 @@ class SystemAudioControl:
                     self.text_area.image_create(tk.END, image=tk_img, padx=10, pady=4)
                     self.text_area.insert(tk.END, '\n')
                 else:
-                    # Fallback: hiển thị text thô
-                    self.text_area.insert(tk.END, f'  [{part.strip()}]\n', 'code')
+                    # Fallback: thu render Unicode matrix truoc
+                    uni = self._unicode_matrix(part.strip())
+                    if uni:
+                        self.text_area.insert(tk.END, '\n', 'normal_text')
+                        for mline in uni.split('\n'):
+                            self.text_area.insert(tk.END, '  ' + mline + '\n', 'code')
+                    else:
+                        # Hien thi LaTeX source voi mau khac biet
+                        self.text_area.insert(tk.END, f'  {part.strip()}\n', 'code')
             else:
                 # Text thường — xử lý từng dòng
                 lines = part.split('\n')
@@ -1331,7 +1552,12 @@ class SystemAudioControl:
                             self.photo_images.append(img)
                             self.text_area.image_create(tk.END, image=img, pady=1)
                         else:
-                            self.text_area.insert(tk.END, f'${sval}$', 'bold')
+                            uni = self._unicode_matrix(sval)
+                            if uni:
+                                for ml in uni.split('\n'):
+                                    self.text_area.insert(tk.END, ml + ' ', 'code')
+                            else:
+                                self.text_area.insert(tk.END, f'${sval}$', 'bold')
                     else:
                         self.text_area.insert(tk.END, sval, 'bold')
             else:
@@ -1343,7 +1569,12 @@ class SystemAudioControl:
                             self.photo_images.append(img)
                             self.text_area.image_create(tk.END, image=img, pady=1)
                         else:
-                            self.text_area.insert(tk.END, f'${sval}$', base_tag)
+                            uni = self._unicode_matrix(sval)
+                            if uni:
+                                for ml in uni.split('\n'):
+                                    self.text_area.insert(tk.END, ml + ' ', 'code')
+                            else:
+                                self.text_area.insert(tk.END, f'${sval}$', base_tag)
                     else:
                         self.text_area.insert(tk.END, sval, base_tag)
         self.text_area.insert(tk.END, '\n')
@@ -1372,7 +1603,13 @@ class SystemAudioControl:
                     self.photo_images.append(img)
                     self.text_area.image_create(tk.END, image=img, pady=1)
                 else:
-                    self.text_area.insert(tk.END, part, 'normal_text')
+                    uni = self._unicode_matrix(expr)
+                    if uni:
+                        self.text_area.insert(tk.END, '\n', 'normal_text')
+                        for ml in uni.split('\n'):
+                            self.text_area.insert(tk.END, '  ' + ml + '\n', 'code')
+                    else:
+                        self.text_area.insert(tk.END, part, 'normal_text')
             else:
                 self.text_area.insert(tk.END, part, 'normal_text')
         self.text_area.insert(tk.END, '\n')
@@ -1411,8 +1648,12 @@ class SystemAudioControl:
             if self.debug_mode_var.get():
                 print(f"Lỗi khi copy vào Clipboard: {e}")
 
-    def _finalize_pc_display(self, full_answer):
+    def _finalize_pc_display(self, full_answer, ai_msg_id=None):
         self.text_area.configure(state='normal')
+        # Cập nhật anchor đến dòng hiện tại
+        if ai_msg_id is not None:
+            current_line = int(self.text_area.index(tk.END).split('.')[0])
+            self.msg_anchor_map[ai_msg_id] = current_line
         try:
             user_ranges = self.text_area.tag_ranges('user_tag')
             if user_ranges:
