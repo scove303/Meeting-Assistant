@@ -1121,22 +1121,54 @@ class SystemAudioControl:
         return html
 
     # === LATEX RENDERING ===
+    def _preprocess_latex(self, expr):
+        """
+        Chuyen doi cac ki hieu LaTeX khong duoc matplotlib ho tro
+        thanh dang tuong duong de tang ti le render thanh cong.
+        """
+        # \underbrace{X}_{label} -> X  (matplotlib khong ho tro underbrace)
+        expr = re.sub(r'\\underbrace\{([^}]*)\}_\{[^}]*\}', r'\1', expr)
+        expr = re.sub(r'\\underbrace\{([^}]*)\}', r'\1', expr)
+        # \overbrace tuong tu
+        expr = re.sub(r'\\overbrace\{([^}]*)\}_\{[^}]*\}', r'\1', expr)
+        # Cac mui ten / ky hieu duoc ho tro boi matplotlib mathtext
+        # (matplotlib ho tro \to, \Rightarrow, \downarrow, \uparrow, etc.)
+        # Nhung mot so bien the khong chuan can sua:
+        expr = expr.replace(r'\implies', r'\Rightarrow')
+        expr = expr.replace(r'\iff',     r'\Leftrightarrow')
+        expr = expr.replace(r'\ge',      r'\geq')
+        expr = expr.replace(r'\le',      r'\leq')
+        expr = expr.replace(r'\ne',      r'\neq')
+        # \text{} -> \mathrm{} (matplotlib ho tro mathrm tot hon)
+        expr = re.sub(r'\\text\{([^}]*)\}', r'\\mathrm{\1}', expr)
+        # Xoa cac lenh khong ho tro ma co the gay loi
+        expr = re.sub(r'\\label\{[^}]*\}', '', expr)
+        expr = re.sub(r'\\tag\{[^}]*\}',   '', expr)
+        expr = re.sub(r'\\nonumber',        '', expr)
+        expr = re.sub(r'\\notag',           '', expr)
+        # \left( \right) duoc ho tro, giu nguyen
+        return expr.strip()
+
     def render_latex_image(self, latex_str, display=False):
         """
         Render LaTeX thanh anh PNG bang matplotlib mathtext.
+        Kich thuoc anh khop voi font Consolas 10pt cua widget.
         Tra ve tk.PhotoImage hoac None neu loi.
         """
         try:
-            expr = latex_str.strip()
+            expr = self._preprocess_latex(latex_str)
             if not expr:
                 return None
-            
-            fontsize = 22 if display else 16
-            dpi = 150
+
+            # Kich thuoc khop voi Consolas 10pt (widget font)
+            # inline: fontsize=10pt, dpi=96 -> ~13px cao (+ padding -> ~22px)
+            # display: fontsize=14pt, dpi=96 -> ~18px cao (+ padding -> ~30px)
+            fontsize = 13 if display else 10
+            dpi = 96
             bg_color = '#1e1e1e'
-            bg_rgb = (30, 30, 30)  # #1e1e1e tuong duong
-            
-            # Render vao figure lon
+            bg_rgb = (30, 30, 30)
+
+            # Render vao canvas lon, se crop bang PIL
             fig, ax = plt.subplots(figsize=(20, 3))
             fig.patch.set_facecolor(bg_color)
             ax.set_axis_off()
@@ -1152,49 +1184,43 @@ class SystemAudioControl:
                         facecolor=bg_color, edgecolor='none')
             plt.close(fig)
             buf.seek(0)
-            
-            # Auto-crop bang PIL: loai bo vung nen toi
+
+            # Auto-crop: chi giu vung co pixel khac mau nen
             pil_img = Image.open(buf).convert('RGB')
-            
-            # Tao mask: pixel khac mau nen la noi dung
-            import numpy as np
             arr = np.array(pil_img)
-            mask = ~(
-                (arr[:,:,0] == bg_rgb[0]) &
-                (arr[:,:,1] == bg_rgb[1]) &
-                (arr[:,:,2] == bg_rgb[2])
+            # Dung nguong (~5 don vi) thay vi ket hop chinh xac de bat
+            # ca cac pixel anti-alias
+            diff = (
+                np.abs(arr[:,:,0].astype(int) - bg_rgb[0]) +
+                np.abs(arr[:,:,1].astype(int) - bg_rgb[1]) +
+                np.abs(arr[:,:,2].astype(int) - bg_rgb[2])
             )
+            mask = diff > 8
             rows = np.any(mask, axis=1)
             cols = np.any(mask, axis=0)
             if not rows.any():
-                # Fallback neu khong tim thay noi dung
                 return None
             rmin, rmax = np.where(rows)[0][[0, -1]]
             cmin, cmax = np.where(cols)[0][[0, -1]]
-            
-            # Them padding
-            pad_px = 10 if display else 7
+
+            # Padding nho xung quanh cong thuc
+            pad_px = 4 if display else 3
             h, w = arr.shape[:2]
             rmin = max(0, rmin - pad_px)
             rmax = min(h - 1, rmax + pad_px)
             cmin = max(0, cmin - pad_px)
             cmax = min(w - 1, cmax + pad_px)
-            
+
             cropped = pil_img.crop((cmin, rmin, cmax + 1, rmax + 1))
-            
-            # Scale len 2x de doc duoc tren man hinh (Tkinter hien thi 1:1 pixel)
-            scale = 2
-            new_w = cropped.width * scale
-            new_h = cropped.height * scale
-            cropped = cropped.resize((new_w, new_h), Image.LANCZOS)
-            
+
+            # Khong upscale - giu nguyen kich thuoc khop voi text widget
             import base64
             out_buf = io.BytesIO()
             cropped.save(out_buf, format='PNG')
             b64_data = base64.b64encode(out_buf.getvalue()).decode('utf-8')
             tk_img = tk.PhotoImage(data=b64_data)
             return tk_img
-            
+
         except Exception as e:
             try:
                 plt.close('all')
