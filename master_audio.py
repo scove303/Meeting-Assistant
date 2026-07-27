@@ -43,7 +43,7 @@ GROQ_API_KEYS = [
     "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",
     "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",
 ]
-GEMINI_API_KEY = 'AQ.Ab8RN6KAFu7xDxwrEbLTkc9lZwTnSgGGXH-VV-E0Tocr74zeaA' 
+GEMINI_API_KEY = 'AIzaSyBG8PO_PjKFQc2oQI2GOiVGp5STu3bzAAs' 
 GEMINI_MODEL = 'gemini-3-flash-preview' 
 
 # (Tuỳ chọn) Mathpix API dùng để đọc công thức toán học siêu chính xác
@@ -51,7 +51,7 @@ GEMINI_MODEL = 'gemini-3-flash-preview'
 MATHPIX_APP_ID = ""
 MATHPIX_APP_KEY = ""
 
-MOBILE_PORT = 5001
+MOBILE_PORT = 5003
 
 # Screenshot Config
 SCREENSHOT_HOTKEY = 'z'  # Sẽ kết hợp với Ctrl+Shift+Alt
@@ -63,115 +63,157 @@ if not os.path.exists(SCREENSHOT_SAVE_PATH):
 
 # PLACEHOLDER SYSTEM PROMPT
 SYSTEM_PROMPT = r"""
-Bạn là một trợ lý Toán học và Khoa học chuyên nghiệp, chuyên về Đại số tuyến tính và các kiến thức cơ bản.
+Bạn là một trợ lý giải Toán theo phong cách "Visual Note" (Ghi chú trực quan).
+Đối tượng: Học sinh lớp 12 mất gốc, hay quên công thức.
 
-MỤC TIÊU: Giải quyết bài toán một cách trực quan, ngắn gọn, dễ hiểu và tuân thủ nghiêm ngặt định dạng hiển thị.
+MỤC TIÊU:
+Tối đa hóa khả năng "nhìn lướt" (scannability). KHÔNG viết đoạn văn. KHÔNG giải thích dông dài. Chỉ dùng từ khóa, công thức và ký hiệu.
 
-QUY TẮC HIỂN THỊ (BẮT BUỘC):
-1. Ngôn ngữ: 100% Tiếng Việt.
-2. Công thức: Dùng LaTeX. Inline là $...$, Block (xuống dòng) là $$...$$.
-3. Phong cách: Đi thẳng vào vấn đề. KHÔNG chào hỏi, KHÔNG mở bài/kết bài lan man. KHÔNG giải thích dông dài văn tự.
-4. Cấu trúc bài giải: Chia thành các bước rõ ràng. Mỗi bước phải tuân theo format sau:
-   ### Bước [n]: [Tên hành động cụ thể]
-   - Giải thích: [Lý do ngắn gọn - chỉ 1 câu, nếu cần thiết]
-   - Thực hiện: [Trình bày phép tính/biến đổi]
-5. Kết quả: Bắt buộc ghi dòng cuối cùng là: **Kết quả: [Đáp án]**
+QUY TẮC HIỂN THỊ (NGHIÊM NGẶT):
+1.  **Format**: Sử dụng cấu trúc khối, gạch đầu dòng và mũi tên ($\to, \Rightarrow, \downarrow$) thay vì lời nói.
+2.  **Công thức (Quan trọng nhất)**: Luôn để công thức trong block trích dẫn (`>`) ngay trước khi áp dụng.
+3.  **Phong cách giải**: 
+    - Dòng 1: Xác định dạng bài (Ví dụ: Dạng $0/0$, Tích phân từng phần...).
+    - Các bước: Trình bày dạng dòng chảy.
+    - Toán: Viết tường minh, không làm tắt bước thay số.
 
-QUY TẮC SƯ PHẠM (Dựa trên chuẩn đầu ra):
-1. Phạm vi kiến thức: Tập trung vào Đại số tuyến tính (Vector, Ma trận, Khử Gauss, Không gian vector, Trị riêng/Vector riêng).
-2. Phương pháp giải: 
-   - Với bài toán khó, hãy chia nhỏ thành các bước sơ cấp nhất.
-   - Ưu tiên sử dụng các phương pháp cơ bản (như khử Gauss, định nghĩa gốc) thay vì các định lý phức tạp hoặc đường tắt trừ khi được yêu cầu.
-   - Đảm bảo người mới học (level beginner) có thể hiểu được logic biến đổi.
+CẤU TRÚC BÀI LÀM:
+### 📌 [Tên dạng bài toán]
 
-VÍ DỤ MẪU VỀ CÁCH TRÌNH BÀY:
-User: Giải hệ phương trình: x + y = 3, 2x - y = 0
+> **💡 Công thức cần nhớ:**
+> [Ghi công thức tổng quát $y = f(x)...$ ở đây]
+
+**Bước [n]: [Hành động ngắn gọn]**
+$$ [Biểu thức Toán học] $$
+$\downarrow$ *[Giải thích siêu ngắn bằng 3-5 từ hoặc mũi tên]*
+$$ [Biểu thức sau biến đổi] $$
+
+---
+
+**🏁 Kết quả: [Đáp án]**
+
+VÍ DỤ MẪU (Bắt buộc làm theo style này):
+
+User: Tính $I = \int x \ln x \, dx$
+
 AI:
-### Bước 1: Viết ma trận bổ sung
-- Biểu diễn hệ dưới dạng $[A|b]$:
-$$ \left[\begin{array}{cc|c} 1 & 1 & 3 \\ 2 & -1 & 0 \end{array}\right] $$
 
-### Bước 2: Khử Gauss (Khử phần tử ở dòng 2, cột 1)
-- Lấy dòng 2 trừ đi 2 lần dòng 1 ($R_2 \leftarrow R_2 - 2R_1$):
-$$ \left[\begin{array}{cc|c} 1 & 1 & 3 \\ 0 & -3 & -6 \end{array}\right] $$
+### 📌 Tích phân từng phần
 
-### Bước 3: Tìm nghiệm từ dưới lên
-- Từ dòng 2: $-3y = -6 \Rightarrow y = 2$.
-- Thay vào dòng 1: $x + 2 = 3 \Rightarrow x = 1$.
+> **💡 Công thức:**
+> $\int u \, dv = u.v - \int v \, du$
+> (Mẹo: Nhất Lô, Nhì Đa, Tam Lượng, Tứ Mũ $\to$ Đặt $u = \ln x$)
 
-**Kết quả: $x = 1, y = 2$**
+**Bước 1: Đặt $u$ và $dv$**
 
+$$
+\begin{cases} u = \ln x \\ dv = x \, dx \end{cases}
+\Rightarrow
+\begin{cases} du = \frac{1}{x} \, dx \\ v = \frac{x^2}{2} \end{cases}
+$$
+
+**Bước 2: Thay vào công thức**
+$$ I = \underbrace{\ln x}_{u} \cdot \underbrace{\frac{x^2}{2}}_{v} - \int \underbrace{\frac{x^2}{2}}_{v} \cdot \underbrace{\frac{1}{x} \, dx}_{du} $$
+
+**Bước 3: Rút gọn và tính**
+$$ I = \frac{x^2}{2}\ln x - \frac{1}{2} \int x \, dx $$
+$\downarrow$ *Áp dụng $\int x dx = \frac{x^2}{2}$*
+$$ I = \frac{x^2}{2}\ln x - \frac{1}{2} \cdot \frac{x^2}{2} + C $$
+
+---
+
+**🏁 Kết quả: $I = \frac{x^2}{2}\ln x - \frac{x^4}{4} + C$**
 
 các chuẩn kiến thức, kỹ năng đầu ra như sau:
 
-1. Hiểu được vector
+1. Hiểu được quy tắc L'Hopistal
 
-- Hiểu được các phép toán cơ bản của vector cộng, trừ,  vector nhân vector với một số thực
+- Hiểu được quy tắc dạng 0/0
 
-2. Hiểu được các phép nâng cao như:
+- Hiểu được quy tắc dạng ∞/∞
 
-- Tổ hợp tuyến tính của vector, nhân trong (tích vô hướng), độ dài vector ánh xạ tuyến tính của vector"
+- Hiểu được các dạng khác của quy tắc L'Hopistal
 
-3. Hiểu được ánh xạ tuyến tính
+2. Hiểu được những khái niệm liên quan đến phương trình tham số như:
 
-- Hiểu được nguyên lý quy nạp
+- Phương trình tham số của quỹ đạo
 
-- Hiểu được anh xạ tuyến tính được biểu diễn dưới dạng ma trận"
+- Hệ số góc của đường cong
 
-4. Nắm dược các khái niệm cơ bản của ma trận như:
+- Vị trí và vận tốc, gia tốc
 
-- Ma trận 0, 
+3. Hiểu được những khái niệm liên quan đến ứng dụng của đạo hàm như:
 
-- Ma trận đơn vị, 
+- Tốc độ, quãng đường đi được của vật thể
 
-- Ma trận chéo, 
+- Đạo hàm cấp 2 và tính lồi lõm của hàm số
 
-- Ma trận tam giác, 
+- Gia tốc của vật trong chuyển động
 
-- Ma trận chuyển vị, 
+4. Nắm được các khái niệm về chuỗi số:
 
-- Ma trận đối xứng
+- Nắm được khái niệm cơ bản về dãy số
 
-5. Hiểu được các phép toán của ma trận như:
+- Nắm được khái niệm cơ bản của chuỗi số, thế nào là chuỗi hội tụ và phân kỳ
 
-- Nhân ma trận với một số
+5. Nắm được cách tính chất của chuỗi chẳng hạn như:
 
-- Cộng hai ma trận cùng cỡ
+- Tổng các số của một cấp số nhân
 
-6. Nắm được điều kiện để nhân ma trận với một vector, Hiểu được các nhân giữa ma trận và vector (dot product)"
+- Nắm được chuỗi mũ.
 
-7. Nắm được cách nhân ma trận chuyển vị với một vector, một ma trận tam giác với một vector, ma trận đối xứng với một vector
+6. Hiểu được khai triển Taylor và Maclaurin của một đa thức.
 
-8. Nắm được từ ánh xạ tuyến tính đến nhân ma trận với ma trận
+7. Hiểu được các cách xác định tính hội tụ của chuỗi:
 
-9. Hiểu được điều kiện và thực hiện phép nhân hai ma trận
+- Kiểm tra tính hội tụ của chuỗi đan dấu
 
-10. Hiểu được cách phân chia một ma trận thành nhiều ma trận con để thực hiện phép nhân
+-Kiểm tra tính hội tụ bằng phương pháp phân
 
-11. Hiểu dược khử Gauss, thêm ma trận vào bên phải, biến đổi Gauss đồng thời cả hai ma trận
+8. Hiểu được cách xác định độ sai số khi khai triển chuỗi
 
-12. Hiểu được cách giải phương trình ma trận Ax = b bằng khử Gauss (đưa ma trận về dạng tam giác trên và tam giác dưới)
+9. Vận dụng tính chất của chuỗi trong việc như:
 
-13. Hiểu khử Gauss để tìm ma trận nghịch đảo
+- Tính đạo hàm và tích phân
 
-14. Hiểu được giải phương trình Ax = b bằng cách tìm ma trận nghịch đảo
+- Các tính toán thông thường của hàm số
 
-15. Nắm được các khái niệm về không gian vector như:
+- Khai triển bằng phương pháp thay thế
 
-- Không gian con, không gian cột, không gian Null"
+10. Nắm được công thức độ dài cung
 
-16. Hiểu được span, độc lập tuyến tính, cơ sở của không gian con, số chiều của không gian con
+- Công thức độ dài cung
 
-17. Hiểu thêm về không gian vector như: 
+- Độ dài cung của phương trình tham số trong tọa độ cực
 
-- Vector trực giao và không gian trực giao
+11. Hiểu được phương pháp Euler
 
-- Hiểu được lời giải gần đúng bằng phương pháp bình phương tối thiểu"
+- Hiểu cách tính phương trình tiếp tuyến tại một điểm
 
-18. Nắm được phép chiếu vector xuống một không gian con, cơ sở trực chuẩn, chuyển đổi cơ sở
+- Hiểu được các khai triển gần đúng tuyến tính của một phương trình tại một điểm
 
-19. Nắm được khái niệm về trị riêng, vector riêng và các bài toán liên quan
-"""
+- Giải gần đúng phương trình vi phân bằng phương pháp số
+
+12. Hiểu được tích phân suy rộng định nghĩa, ví dụ
+
+13. Hiểu được các phương pháp kiểm tra tính hội tụ của tích phân suy rộng
+
+14. Hiểu được kỹ thuật tính tích phân ở dạng phân số
+
+- Tính tích phân ở dạng phân số
+
+- Giải phương trình vi phân ở dạng đa thức
+
+15. Hiểu được kỹ thuật tính tích phân từng phần
+
+16. Hiểu được hàm trong tọa độ cực
+
+- Hệ sộ góc trong tọa độ cực
+
+- Diện tích của vùng giới hạn bởi 1 đường trong tọa độ cực
+
+- Diện tích của vùng giới hạn bởi hơn 1 đường trong tọa độ cực
+  """
 
 # Audio Config
 CHUNK = 8192
@@ -235,18 +277,20 @@ MOBILE_HTML = """
         var container = document.getElementById('container');
         var currentDiv = null;
 
-        socket.on('new_user_message', function(data) { addMessage('user', data.content); });
+        socket.on('new_user_message', function(data) { addMessage('user', data.content, data.msg_id); });
 
-        socket.on('start_response', function() {
+        socket.on('start_response', function(data) {
             currentDiv = document.createElement('div');
             currentDiv.className = 'msg ai';
+            if (data && data.msg_id != null) {
+                currentDiv.dataset.msgId = data.msg_id;
+            }
             container.appendChild(currentDiv);
             window.scrollTo(0, document.body.scrollHeight);
         });
 
         socket.on('stream_chunk', function(data) {
             if (!currentDiv) return;
-            // Chỉ hiển thị text thô khi đang stream để tránh vỡ HTML
             let display = data.text.replace(/</g, "&lt;").replace(/>/g, "&gt;");
             currentDiv.innerHTML += display.replace(/\\n/g, "<br>");
             window.scrollTo(0, document.body.scrollHeight);
@@ -254,7 +298,6 @@ MOBILE_HTML = """
 
         socket.on('finish_response', function(data) {
             if (!currentDiv) return;
-            // Khi xong mới render HTML + MathJax
             currentDiv.innerHTML = data.html; 
             MathJax.typesetPromise([currentDiv]).then(() => {
                 window.scrollTo(0, document.body.scrollHeight);
@@ -264,15 +307,55 @@ MOBILE_HTML = """
         
         socket.on('clear_chat', function() { container.innerHTML = '<div class="msg ai">🧹 Memory Cleared.</div>'; });
 
+        // === SCROLL ANCHOR SYNC ===
+        let isSyncingScroll = false;
+        
+        function getTopmostMsgId() {
+            // Tìm phần tử [data-msg-id] đầu tiên đang hiển thị trong viewport
+            let allMsgs = container.querySelectorAll('[data-msg-id]');
+            let best = null;
+            for (let el of allMsgs) {
+                let rect = el.getBoundingClientRect();
+                if (rect.bottom > 0) {
+                    best = el;
+                    break;
+                }
+            }
+            return best ? parseInt(best.dataset.msgId) : null;
+        }
+
+        let scrollTimer = null;
+        window.addEventListener('scroll', function() {
+            if (isSyncingScroll) return;
+            // Debounce: chỉ gửi sau khi người dùng dừng scroll 80ms
+            clearTimeout(scrollTimer);
+            scrollTimer = setTimeout(function() {
+                let msgId = getTopmostMsgId();
+                if (msgId !== null) {
+                    socket.emit('sync_scroll_anchor', {msg_id: msgId});
+                }
+            }, 80);
+        });
+
+        socket.on('sync_scroll_anchor', function(data) {
+            isSyncingScroll = true;
+            let el = container.querySelector('[data-msg-id="' + data.msg_id + '"]');
+            if (el) {
+                el.scrollIntoView({behavior: 'instant', block: 'start'});
+            }
+            setTimeout(() => { isSyncingScroll = false; }, 150);
+        });
+
         function send() {
             var val = document.getElementById('text-input').value;
             if(val) { socket.emit('text_message', {text: val}); addMessage('user', val); document.getElementById('text-input').value = ''; }
         }
         
-        function addMessage(role, text) {
+        function addMessage(role, text, msg_id) {
             var div = document.createElement('div');
             div.className = 'msg ' + role;
-            div.innerHTML = text.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\\n/g, '<br>');
+            if (msg_id != null) div.dataset.msgId = msg_id;
+            div.innerHTML = text.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, '<br>');
             container.appendChild(div);
             window.scrollTo(0, document.body.scrollHeight);
         }
@@ -296,15 +379,24 @@ class AudioMobileServer:
             text = data.get('text', '').strip()
             if text:
                 Thread(target=self.assistant.process_text_input, args=(text,), daemon=True).start()
+                
+        @self.socketio.on('sync_scroll_anchor')
+        def handle_sync_scroll(data):
+            msg_id = data.get('msg_id')
+            if msg_id is not None and hasattr(self.assistant, 'sync_desktop_scroll'):
+                self.assistant.sync_desktop_scroll(msg_id)
         
     def run(self):
         self.socketio.run(self.app, host='0.0.0.0', port=MOBILE_PORT, allow_unsafe_werkzeug=True)
 
-    def send_user_message(self, content):
-        self.socketio.emit('new_user_message', {'content': content})
+    def send_scroll_anchor(self, msg_id):
+        self.socketio.emit('sync_scroll_anchor', {'msg_id': msg_id})
 
-    def emit_start(self):
-        self.socketio.emit('start_response')
+    def send_user_message(self, content, msg_id=None):
+        self.socketio.emit('new_user_message', {'content': content, 'msg_id': msg_id})
+
+    def emit_start(self, msg_id=None):
+        self.socketio.emit('start_response', {'msg_id': msg_id})
 
     def emit_chunk(self, text):
         self.socketio.emit('stream_chunk', {'text': text})
@@ -323,8 +415,8 @@ class SystemAudioControl:
         self.root = None
         self.is_recording = False
         self.is_processing_image = False
-        self.is_screenshot_mode = False  # Flag cho screenshot mode
-        self.screenshot_start_pos = None  # Vị trí bắt đầu screenshot
+        self.is_screenshot_mode = False
+        self.screenshot_start_pos = None
         self.stop_event = Event()
         self.audio = pyaudio.PyAudio()
         
@@ -332,9 +424,12 @@ class SystemAudioControl:
         self.mic_frames = []
         self.conversation_history = []
         
-        # Giữ tham chiếu đến PhotoImage để tránh garbage collection
         self.photo_images = []
         
+        # === SCROLL ANCHOR TRACKING ===
+        self.msg_counter = 0        # ID tăng dần cho mỗi tin nhắn
+        self.msg_anchor_map = {}    # {msg_id: tk.END char index khi insert}
+
         # === VARIABLES CHO CẤU HÌNH ẢNH ===
         self.scan_w_var = None
         self.scan_h_var = None
@@ -493,6 +588,31 @@ class SystemAudioControl:
         )
         self.text_area.pack(fill=tk.BOTH, expand=True)
 
+        self.orig_yscroll = self.text_area['yscrollcommand']
+        self.is_syncing_scroll = False
+        
+        def my_yscroll(*args):
+            self.text_area.tk.call(self.orig_yscroll, *args)
+            if not getattr(self, 'is_syncing_scroll', False) and hasattr(self, 'server') and self.server:
+                try:
+                    # Tìm dòng đang hiển thị ở đầu viewport
+                    top_index = self.text_area.index("@0,0")
+                    top_line = int(top_index.split('.')[0])
+                    # Tìm msg_id gần nhất có line <= top_line
+                    best_id = None
+                    best_line = -1
+                    for mid, mline in self.msg_anchor_map.items():
+                        if mline <= top_line and mline > best_line:
+                            best_line = mline
+                            best_id = mid
+                    if best_id is not None:
+                        self.server.send_scroll_anchor(best_id)
+                except Exception as e:
+                    if getattr(self, 'debug_mode_var', None) and self.debug_mode_var.get():
+                        print("Scroll anchor error:", e)
+                    
+        self.text_area.config(yscrollcommand=my_yscroll)
+
         # === DEFINE TAGS ===
         self.text_area.tag_config('user_tag', foreground='#4ec9b0', font=('Consolas', 10, 'bold'))
         self.text_area.tag_config('ai_tag', foreground='#569cd6', font=('Consolas', 10, 'bold'))
@@ -544,6 +664,21 @@ class SystemAudioControl:
         self.update_device_info()
         self.root.after(100, lambda: self.status_lbl.config(text="● Ready", fg='#4ec9b0'))
 
+    def sync_desktop_scroll(self, msg_id):
+        """Cuộn desktop đến đúng tin nhắn theo msg_id anchor."""
+        def _do_sync():
+            self.is_syncing_scroll = True
+            try:
+                msg_id_int = int(msg_id)
+                target_line = self.msg_anchor_map.get(msg_id_int)
+                if target_line and target_line > 0:
+                    self.text_area.see(f"{target_line}.0")
+            except Exception:
+                pass
+            self.root.after(50, lambda: setattr(self, 'is_syncing_scroll', False))
+        if self.root:
+            self.root.after(0, _do_sync)
+
     def _get_ip(self):
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -582,8 +717,12 @@ class SystemAudioControl:
         self.text_input.delete(0, tk.END)
         
         # Display user message
+        msg_id = self.msg_counter
+        self.msg_counter += 1
+        current_line = int(self.text_area.index(tk.END).split('.')[0])
+        self.msg_anchor_map[msg_id] = current_line
         self.format_and_insert("User", text)
-        self.server.send_user_message(text)
+        self.server.send_user_message(text, msg_id=msg_id)
         
         # Process
         Thread(target=self.process_text_input, args=(text,), daemon=True).start()
@@ -1008,7 +1147,13 @@ class SystemAudioControl:
 
             # Stream Response
             self.root.after(0, lambda: self.status_lbl.config(text="💬 Thinking...", fg='#569cd6'))
-            self.server.emit_start()
+            
+            # Tạo anchor cho tin AI ngay trước khi start
+            ai_msg_id = self.msg_counter
+            self.msg_counter += 1
+            # Ghi dòng sử là -1 tạm thời, sẽ update lúc finalize
+            self.msg_anchor_map[ai_msg_id] = -1
+            self.server.emit_start(msg_id=ai_msg_id)
 
             full_answer = ""
             max_retries = len(GROQ_API_KEYS)
@@ -1046,7 +1191,7 @@ class SystemAudioControl:
             self.server.emit_finish(html_answer)
 
             # Finish PC
-            self.root.after(0, lambda: self._finalize_pc_display(full_answer))
+            self.root.after(0, lambda fa=full_answer, aid=ai_msg_id: self._finalize_pc_display(fa, aid))
             self.root.after(0, lambda: self.status_lbl.config(text="● Ready", fg='#4ec9b0'))
 
         except Exception as e:
@@ -1084,28 +1229,139 @@ class SystemAudioControl:
         Chuyen doi cac ki hieu LaTeX khong duoc matplotlib ho tro
         thanh dang tuong duong de tang ti le render thanh cong.
         """
-        # \underbrace{X}_{label} -> X  (matplotlib khong ho tro underbrace)
-        expr = re.sub(r'\\underbrace\{([^}]*)\}_\{[^}]*\}', r'\1', expr)
-        expr = re.sub(r'\\underbrace\{([^}]*)\}', r'\1', expr)
-        # \overbrace tuong tu
-        expr = re.sub(r'\\overbrace\{([^}]*)\}_\{[^}]*\}', r'\1', expr)
-        # Cac mui ten / ky hieu duoc ho tro boi matplotlib mathtext
-        # (matplotlib ho tro \to, \Rightarrow, \downarrow, \uparrow, etc.)
-        # Nhung mot so bien the khong chuan can sua:
+        # Fix typo cua AI: \1n -> \ln
+        expr = expr.replace(r'\1n', r'\ln')
+        
+        # \underbrace{X}_{label} -> X (ho tro ngoac long nhau)
+        def strip_command_with_braces(text, cmd):
+            while True:
+                idx = text.find(cmd + '{')
+                if idx == -1: break
+                count = 0
+                start_content = idx + len(cmd) + 1
+                end_content = -1
+                for i in range(idx + len(cmd), len(text)):
+                    if text[i] == '{': count += 1
+                    elif text[i] == '}':
+                        count -= 1
+                        if count == 0:
+                            end_content = i
+                            break
+                if end_content != -1:
+                    content = text[start_content:end_content]
+                    suffix_end = end_content + 1
+                    if suffix_end < len(text) and text[suffix_end] in ['_', '^']:
+                        if suffix_end + 1 < len(text) and text[suffix_end+1] == '{':
+                            scount = 0
+                            for i in range(suffix_end + 1, len(text)):
+                                if text[i] == '{': scount += 1
+                                elif text[i] == '}':
+                                    scount -= 1
+                                    if scount == 0:
+                                        suffix_end = i + 1
+                                        break
+                        else:
+                            suffix_end += 2
+                    text = text[:idx] + content + text[suffix_end:]
+                else:
+                    break
+            return text
+            
+        expr = strip_command_with_braces(expr, r'\underbrace')
+        expr = strip_command_with_braces(expr, r'\overbrace')
+
+        # Cac bien the mui ten - chi thay the khi la lenh doc lap
         expr = expr.replace(r'\implies', r'\Rightarrow')
         expr = expr.replace(r'\iff',     r'\Leftrightarrow')
-        expr = expr.replace(r'\ge',      r'\geq')
-        expr = expr.replace(r'\le',      r'\leq')
-        expr = expr.replace(r'\ne',      r'\neq')
-        # \text{} -> \mathrm{} (matplotlib ho tro mathrm tot hon)
-        expr = re.sub(r'\\text\{([^}]*)\}', r'\\mathrm{\1}', expr)
-        # Xoa cac lenh khong ho tro ma co the gay loi
+        # \ge -> \geq, \le -> \leq, \ne -> \neq
+        # Dung regex de tranh thay the \left -> \leqft hay \geq -> \geqq
+        expr = re.sub(r'\\ge(?![a-zA-Z])', r'\\geq', expr)
+        expr = re.sub(r'\\le(?![a-zA-Z])', r'\\leq', expr)
+        expr = re.sub(r'\\ne(?![a-zA-Z])', r'\\neq', expr)
+        # \text{}: neu co ky tu non-ASCII (tieng Viet...) thi xoa di,
+        # neu ASCII thuan thi dung \mathrm{}
+        def _replace_text(m):
+            inner = m.group(1)
+            if any(ord(c) > 127 for c in inner):
+                return r'\;'   # chi giu khoang cach
+            return r'\mathrm{' + inner + '}'
+        expr = re.sub(r'\\text\{([^}]*)\}', _replace_text, expr)
+        # Xoa cac lenh khong ho tro
         expr = re.sub(r'\\label\{[^}]*\}', '', expr)
         expr = re.sub(r'\\tag\{[^}]*\}',   '', expr)
         expr = re.sub(r'\\nonumber',        '', expr)
         expr = re.sub(r'\\notag',           '', expr)
         # \left( \right) duoc ho tro, giu nguyen
         return expr.strip()
+
+    def _unicode_matrix(self, latex_str):
+        """
+        Parse moi truong ma tran (bmatrix, pmatrix, cases, matrix) va
+        tra ve chuoi Unicode text art, hoac None neu khong phai ma tran.
+        Ho tro nhieu ma tran/cases trong cung mot bieu thuc.
+        """
+        original_str = latex_str
+
+        def repl_cases(m):
+            content = m.group(1)
+            rows = [r.strip() for r in re.split(r'\\\\', content) if r.strip()]
+            def clean(s):
+                s = re.sub(r'\\[a-zA-Z]+', '', s)
+                s = re.sub(r'[{}]', '', s)
+                return s.strip()
+            lines = ['{ ' + clean(rows[0])] if rows else []
+            for r in rows[1:]:
+                lines.append('  ' + clean(r))
+            return '\n' + '\n'.join(lines) + '\n'
+
+        latex_str = re.sub(r'\\begin\s*\{cases\}(.*?)\\end\s*\{cases\}', repl_cases, latex_str, flags=re.DOTALL)
+
+        def repl_matrix(m):
+            env = m.group(1) or ''
+            body = m.group(2)
+            bk = {'b': ('\u23a1\u23a2\u23a3', '\u23a4\u23a5\u23a6'),
+                  'p': ('\u239b\u239c\u239d', '\u239e\u239f\u23a0'),
+                  'v': ('|', '|'), 'B': ('\u2016', '\u2016'),
+                  '' : ('',  '')}
+            lb_chars, rb_chars = bk.get(env, ('', ''))
+            rows_raw = re.split(r'\\\\', body)
+            cells = []
+            for row in rows_raw:
+                row = row.strip()
+                if not row: continue
+                cols = [c.strip() for c in row.split('&')]
+                cleaned = []
+                for c in cols:
+                    c = re.sub(r'\\frac\{([^}]*)\}\{([^}]*)\}', r'(\1)/(\2)', c)
+                    c = re.sub(r'\\[a-zA-Z]+', '', c)
+                    c = re.sub(r'[{}]', '', c)
+                    c = c.strip() or '0'
+                    cleaned.append(c)
+                cells.append(cleaned)
+            if not cells: return m.group(0)
+            ncols = max(len(r) for r in cells)
+            widths = [max((len(cells[i][j]) if j < len(cells[i]) else 0) for i in range(len(cells))) for j in range(ncols)]
+            lines = []
+            n = len(cells)
+            for i, row in enumerate(cells):
+                cols_str = '  '.join((row[j] if j < len(row) else '').center(widths[j]) for j in range(ncols))
+                if lb_chars and len(lb_chars) == 3:
+                    if n == 1: p, s = lb_chars[0], rb_chars[0]
+                    elif i == 0: p, s = lb_chars[0], rb_chars[0]
+                    elif i == n - 1: p, s = lb_chars[2], rb_chars[2]
+                    else: p, s = lb_chars[1], rb_chars[1]
+                    lines.append(f'{p} {cols_str} {s}')
+                elif lb_chars:
+                    lines.append(f'{lb_chars} {cols_str} {rb_chars}')
+                else:
+                    lines.append(f'  {cols_str}  ')
+            return '\n' + '\n'.join(lines) + '\n'
+
+        latex_str = re.sub(r'\\begin\s*\{(b|p|v|B|V|small)?matrix\}(.*?)\\end\s*\{(b|p|v|B|V|small)?matrix\}', repl_matrix, latex_str, flags=re.DOTALL)
+
+        if latex_str != original_str:
+            return latex_str.strip()
+        return None
 
     def render_latex_image(self, latex_str, display=False):
         """
@@ -1233,8 +1489,15 @@ class SystemAudioControl:
                     self.text_area.image_create(tk.END, image=tk_img, padx=10, pady=4)
                     self.text_area.insert(tk.END, '\n')
                 else:
-                    # Fallback: hiển thị text thô
-                    self.text_area.insert(tk.END, f'  [{part.strip()}]\n', 'code')
+                    # Fallback: thu render Unicode matrix truoc
+                    uni = self._unicode_matrix(part.strip())
+                    if uni:
+                        self.text_area.insert(tk.END, '\n', 'normal_text')
+                        for mline in uni.split('\n'):
+                            self.text_area.insert(tk.END, '  ' + mline + '\n', 'code')
+                    else:
+                        # Hien thi LaTeX source voi mau khac biet
+                        self.text_area.insert(tk.END, f'  {part.strip()}\n', 'code')
             else:
                 # Text thường — xử lý từng dòng
                 lines = part.split('\n')
@@ -1289,7 +1552,12 @@ class SystemAudioControl:
                             self.photo_images.append(img)
                             self.text_area.image_create(tk.END, image=img, pady=1)
                         else:
-                            self.text_area.insert(tk.END, f'${sval}$', 'bold')
+                            uni = self._unicode_matrix(sval)
+                            if uni:
+                                for ml in uni.split('\n'):
+                                    self.text_area.insert(tk.END, ml + ' ', 'code')
+                            else:
+                                self.text_area.insert(tk.END, f'${sval}$', 'bold')
                     else:
                         self.text_area.insert(tk.END, sval, 'bold')
             else:
@@ -1301,7 +1569,12 @@ class SystemAudioControl:
                             self.photo_images.append(img)
                             self.text_area.image_create(tk.END, image=img, pady=1)
                         else:
-                            self.text_area.insert(tk.END, f'${sval}$', base_tag)
+                            uni = self._unicode_matrix(sval)
+                            if uni:
+                                for ml in uni.split('\n'):
+                                    self.text_area.insert(tk.END, ml + ' ', 'code')
+                            else:
+                                self.text_area.insert(tk.END, f'${sval}$', base_tag)
                     else:
                         self.text_area.insert(tk.END, sval, base_tag)
         self.text_area.insert(tk.END, '\n')
@@ -1330,7 +1603,13 @@ class SystemAudioControl:
                     self.photo_images.append(img)
                     self.text_area.image_create(tk.END, image=img, pady=1)
                 else:
-                    self.text_area.insert(tk.END, part, 'normal_text')
+                    uni = self._unicode_matrix(expr)
+                    if uni:
+                        self.text_area.insert(tk.END, '\n', 'normal_text')
+                        for ml in uni.split('\n'):
+                            self.text_area.insert(tk.END, '  ' + ml + '\n', 'code')
+                    else:
+                        self.text_area.insert(tk.END, part, 'normal_text')
             else:
                 self.text_area.insert(tk.END, part, 'normal_text')
         self.text_area.insert(tk.END, '\n')
@@ -1369,8 +1648,12 @@ class SystemAudioControl:
             if self.debug_mode_var.get():
                 print(f"Lỗi khi copy vào Clipboard: {e}")
 
-    def _finalize_pc_display(self, full_answer):
+    def _finalize_pc_display(self, full_answer, ai_msg_id=None):
         self.text_area.configure(state='normal')
+        # Cập nhật anchor đến dòng hiện tại
+        if ai_msg_id is not None:
+            current_line = int(self.text_area.index(tk.END).split('.')[0])
+            self.msg_anchor_map[ai_msg_id] = current_line
         try:
             user_ranges = self.text_area.tag_ranges('user_tag')
             if user_ranges:
