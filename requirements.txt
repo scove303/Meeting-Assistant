@@ -8,3 +8,6 @@ requests
 mouse
 flask
 flask-socketio
+pygetwindow
+pywin32
+keyboard

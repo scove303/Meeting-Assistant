@@ -20,6 +20,8 @@ from PIL import Image, ImageGrab
 import requests
 import time
 import mouse  # Thêm thư viện mouse cho screenshot
+import pygetwindow as gw
+import win32gui
 
 # --- MATPLOTLIB CHO LATEX RENDERING ---
 import matplotlib
@@ -325,6 +327,7 @@ class SystemAudioControl:
         self.is_processing_image = False
         self.is_screenshot_mode = False  # Flag cho screenshot mode
         self.screenshot_start_pos = None  # Vị trí bắt đầu screenshot
+        self.skip_gemini_api = False  # Bỏ qua API Gemini (dùng để test)
         self.stop_event = Event()
         self.audio = pyaudio.PyAudio()
         
@@ -667,6 +670,9 @@ class SystemAudioControl:
             # Copy vào clipboard (Người dùng gọi cái này là 'quét')
             self._copy_to_clipboard(img)
             
+            # Paste vào AI Studio (chạy song song)
+            self._paste_to_aistudio()
+            
             # Lưu file nếu auto-save bật
             filename = None
             if self.auto_save_var.get():
@@ -679,6 +685,13 @@ class SystemAudioControl:
                 if self.debug_mode_var.get():
                     print(f"✅ Đã lưu: {filename} (quality: {quality}%)")
             
+            if self.skip_gemini_api:
+                print("⏭️ [TEST] Skip Gemini API (skip_gemini_api=True)")
+                self.root.after(0, lambda: self.status_lbl.config(text="⏭️ Test - No API", fg='#dcdcaa'))
+                self.root.after(1500, lambda: self.status_lbl.config(text="● Ready", fg='#4ec9b0'))
+                self.is_processing_image = False
+                return
+
             # Encode và gửi đến Gemini giống như scan
             self.root.after(0, lambda: self.status_lbl.config(text="🔄 Analyzing Screenshot...", fg='#569cd6'))
             
@@ -856,6 +869,16 @@ class SystemAudioControl:
             # Copy vào clipboard
             self._copy_to_clipboard(img)
             
+            # Paste vào AI Studio (chạy song song)
+            self._paste_to_aistudio()
+
+            if self.skip_gemini_api:
+                print("⏭️ [TEST] Skip Gemini API (skip_gemini_api=True)")
+                self.is_processing_image = False
+                self.root.after(0, lambda: self.status_lbl.config(text="⏭️ Test - No API", fg='#dcdcaa'))
+                self.root.after(1500, lambda: self.status_lbl.config(text="● Ready", fg='#4ec9b0'))
+                return
+
             import base64
             buffered = io.BytesIO()
             img.save(buffered, format="JPEG", quality=95)
@@ -1079,6 +1102,46 @@ class SystemAudioControl:
         return html
 
     # === LATEX RENDERING ===
+    def _convert_bracket_math_to_display(self, text):
+        """Convert [LaTeX] display math blocks to $$LaTeX$$"""
+        latex_indicators = (
+            '\\begin', '\\end', '\\quad', '\\qquad', '\\frac', '\\sqrt',
+            '\\int', '\\sum', '\\prod', '\\lim', '\\to', '\\rightarrow',
+            '\\left', '\\right', '\\displaystyle', '\\binom',
+            '\\matrix', '\\cdots', '\\mathbb',
+        )
+        lines = text.split('\n')
+        result = []
+        i = 0
+        while i < len(lines):
+            stripped = lines[i].strip()
+            if stripped.startswith('[') and any(ind in lines[i] for ind in latex_indicators):
+                depth = 0
+                block = []
+                started = False
+                for c in lines[i]:
+                    if c == '[' and not started:
+                        started = True
+                    if started:
+                        block.append(c)
+                        if c == '[': depth += 1
+                        elif c == ']': depth -= 1
+                j = i
+                while depth > 0 and j + 1 < len(lines):
+                    j += 1
+                    for c in lines[j]:
+                        block.append(c)
+                        if c == '[': depth += 1
+                        elif c == ']': depth -= 1
+                if depth == 0:
+                    content = ''.join(block)[1:-1]
+                    result.append(f'$${content}$$')
+                    i = j + 1
+                    continue
+            result.append(lines[i])
+            i += 1
+        return '\n'.join(result)
+
     def _preprocess_latex(self, expr):
         """
         Chuyen doi cac ki hieu LaTeX khong duoc matplotlib ho tro
@@ -1216,6 +1279,9 @@ class SystemAudioControl:
         
         # Thay thế các cặp \[...\] bằng $$...$$ để xử lý thống nhất
         text = display_pattern2.sub(r'$$\1$$', text)
+        
+        # Xử lý [LaTeX] display math của một số LLM
+        text = self._convert_bracket_math_to_display(text)
         
         # Tách thành blocks
         parts = display_pattern.split(text)
@@ -1368,6 +1434,94 @@ class SystemAudioControl:
         except Exception as e:
             if self.debug_mode_var.get():
                 print(f"Lỗi khi copy vào Clipboard: {e}")
+
+    def _activate_window(self, hwnd):
+        """Bring window to foreground — tries multiple approaches"""
+        import ctypes
+        import win32con
+        user32 = ctypes.windll.user32
+
+        if win32gui.IsIconic(hwnd):
+            win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+        win32gui.ShowWindow(hwnd, win32con.SW_SHOW)
+
+        # Approach 1: SwitchToThisWindow (undocumented but reliable)
+        user32.SwitchToThisWindow(hwnd, True)
+        time.sleep(0.1)
+
+        if win32gui.GetForegroundWindow() == hwnd:
+            return True
+
+        # Approach 2: AttachThreadInput + SetForegroundWindow
+        import win32process
+        fg_hwnd = win32gui.GetForegroundWindow()
+        fg_tid = win32process.GetWindowThreadProcessId(fg_hwnd)[0]
+        target_tid = win32process.GetWindowThreadProcessId(hwnd)[0]
+        if fg_tid != target_tid:
+            win32process.AttachThreadInput(fg_tid, target_tid, True)
+        win32gui.SetForegroundWindow(hwnd)
+        if fg_tid != target_tid:
+            win32process.AttachThreadInput(fg_tid, target_tid, False)
+        time.sleep(0.1)
+
+        if win32gui.GetForegroundWindow() == hwnd:
+            return True
+
+        # Approach 3: Alt+Esc simulation via keyboard library
+        import keyboard as kb
+        if self.debug_mode_var.get():
+            print("   ↳ trying Alt+Esc fallback...")
+        kb.press('alt')
+        kb.press('esc')
+        time.sleep(0.08)
+        kb.release('esc')
+        kb.release('alt')
+        time.sleep(0.2)
+
+        return win32gui.GetForegroundWindow() == hwnd
+
+    def _paste_to_aistudio(self):
+        import keyboard as kb
+        if self.debug_mode_var.get():
+            print("🌐 [AIStudio] Pasting to AI Studio...")
+        try:
+            original_hwnd = win32gui.GetForegroundWindow()
+
+            ai_windows = [w for w in gw.getWindowsWithTitle('AI Studio') if 'agent' not in w.title.lower()]
+            if not ai_windows:
+                ai_windows = [w for w in gw.getAllWindows() if 'AI Studio' in w.title and 'agent' not in w.title.lower()]
+
+            if not ai_windows:
+                if self.debug_mode_var.get():
+                    print("⚠️ [AIStudio] No AI Studio window found")
+                return
+
+            target = ai_windows[0]
+            target_hwnd = target._hWnd
+
+            if self.debug_mode_var.get():
+                print(f"🌐 [AIStudio] Target: '{target.title}'")
+
+            self._activate_window(target_hwnd)
+            time.sleep(0.2)
+
+            kb.send('ctrl+v')
+            time.sleep(0.2)
+
+            kb.send('ctrl+enter')
+            time.sleep(0.2)
+
+            try:
+                self._activate_window(original_hwnd)
+            except:
+                pass
+
+            if self.debug_mode_var.get():
+                print("✅ [AIStudio] Paste complete")
+
+        except Exception as e:
+            if self.debug_mode_var.get():
+                print(f"❌ [AIStudio] Error: {e}")
 
     def _finalize_pc_display(self, full_answer):
         self.text_area.configure(state='normal')
