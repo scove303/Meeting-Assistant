@@ -338,12 +338,30 @@ class SystemAudioControl:
         # Giữ tham chiếu đến PhotoImage để tránh garbage collection
         self.photo_images = []
         
+        # === SESSION LOG ===
+        import os
+        self.session_log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "session_output.txt")
+        
         # === VARIABLES CHO CẤU HÌNH ẢNH ===
         self.scan_w_var = None
         self.scan_h_var = None
         
         # === WEB SERVER MOBILE ===
         self.server = AudioMobileServer(self)
+
+    def save_to_session_log(self, question, answer):
+        """Append câu hỏi + câu trả lời raw vào file session_output.txt"""
+        import datetime
+        try:
+            with open(self.session_log_path, 'a', encoding='utf-8') as f:
+                ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                f.write(f"\n{'='*60}\n")
+                f.write(f"[{ts}]\n")
+                f.write(f"USER: {question}\n")
+                f.write(f"{'─'*40}\n")
+                f.write(f"{answer}\n")
+        except Exception as e:
+            print(f"[SessionLog] Lỗi ghi file: {e}")
 
     def setup_groq(self):
         self.current_groq_key_index = 0
@@ -830,6 +848,9 @@ class SystemAudioControl:
             html_answer = self.markdown_to_html(answer)
             self.server.emit_finish(html_answer)
 
+            # Lưu vào session log
+            self.save_to_session_log(f"[Screenshot {width}x{height}px] {user_query}", answer)
+
             # PC UI
             self.root.after(0, lambda: self._finalize_pc_display(answer))
             self.root.after(2000, lambda: self.status_lbl.config(text="● Ready", fg='#4ec9b0'))
@@ -1064,6 +1085,9 @@ class SystemAudioControl:
             # Lưu lại câu trả lời
             self.conversation_history.append({"role": "assistant", "content": full_answer})
 
+            # Lưu vào session log
+            self.save_to_session_log(user_text, full_answer)
+
             # Finish Mobile
             html_answer = self.markdown_to_html(full_answer)
             self.server.emit_finish(html_answer)
@@ -1144,31 +1168,174 @@ class SystemAudioControl:
 
     def _preprocess_latex(self, expr):
         """
-        Chuyen doi cac ki hieu LaTeX khong duoc matplotlib ho tro
-        thanh dang tuong duong de tang ti le render thanh cong.
+        Chuyen doi LaTeX -> matplotlib mathtext tuong thich.
+        Xu ly: bmatrix, pmatrix, cases, array, cac lenh khong ho tro.
         """
-        # \underbrace{X}_{label} -> X  (matplotlib khong ho tro underbrace)
+        # === XU LY MATRIX / ARRAY ===
+        # Matplotlib ho tro: \begin{matrix} \end{matrix} (khong co khung)
+        # Khung phai dung \left[...\right] tu cau
+
+        # bmatrix -> \left[ matrix \right]
+        def _env_to_matrix(m):
+            body = m.group(1)
+            return r'\\left[\\begin{matrix}' + body + r'\\end{matrix}\\right]'
+        expr = re.sub(
+            r'\\begin\s*\{bmatrix\}(.*?)\\end\s*\{bmatrix\}',
+            _env_to_matrix, expr, flags=re.DOTALL
+        )
+
+        # pmatrix -> \left( matrix \right)
+        def _env_to_pmatrix(m):
+            body = m.group(1)
+            return r'\\left(\\begin{matrix}' + body + r'\\end{matrix}\\right)'
+        expr = re.sub(
+            r'\\begin\s*\{pmatrix\}(.*?)\\end\s*\{pmatrix\}',
+            _env_to_pmatrix, expr, flags=re.DOTALL
+        )
+
+        # vmatrix -> \left| matrix \right|
+        def _env_to_vmatrix(m):
+            body = m.group(1)
+            return r'\\left|\\begin{matrix}' + body + r'\\end{matrix}\\right|'
+        expr = re.sub(
+            r'\\begin\s*\{vmatrix\}(.*?)\\end\s*\{vmatrix\}',
+            _env_to_vmatrix, expr, flags=re.DOTALL
+        )
+
+        # \begin{array}{ccc|c} -> \begin{matrix} (bo column spec)
+        expr = re.sub(
+            r'\\begin\s*\{array\}\s*\{[^}]*\}(.*?)\\end\s*\{array\}',
+            lambda m: r'\\begin{matrix}' + m.group(1) + r'\\end{matrix}',
+            expr, flags=re.DOTALL
+        )
+
+        # cases -> piecewise viet tay bang matrix don gian
+        def _cases_to_matrix(m):
+            body = m.group(1)
+            # Xoa &, \\, strip
+            rows = [r.strip() for r in re.split(r'\\\\', body) if r.strip()]
+            cleaned = []
+            for r in rows:
+                # Xoa & (alignment)
+                r = r.replace('&', '  ')
+                cleaned.append(r)
+            inner = r' \\ '.join(cleaned)
+            return r'\\left\{\\begin{matrix}' + inner + r'\\end{matrix}\\right.'
+        expr = re.sub(
+            r'\\begin\s*\{cases\}(.*?)\\end\s*\{cases\}',
+            _cases_to_matrix, expr, flags=re.DOTALL
+        )
+
+        # === XU LY CAC LENH KHONG HO TRO ===
         expr = re.sub(r'\\underbrace\{([^}]*)\}_\{[^}]*\}', r'\1', expr)
         expr = re.sub(r'\\underbrace\{([^}]*)\}', r'\1', expr)
-        # \overbrace tuong tu
         expr = re.sub(r'\\overbrace\{([^}]*)\}_\{[^}]*\}', r'\1', expr)
-        # Cac mui ten / ky hieu duoc ho tro boi matplotlib mathtext
-        # (matplotlib ho tro \to, \Rightarrow, \downarrow, \uparrow, etc.)
-        # Nhung mot so bien the khong chuan can sua:
-        expr = expr.replace(r'\implies', r'\Rightarrow')
-        expr = expr.replace(r'\iff',     r'\Leftrightarrow')
-        expr = expr.replace(r'\ge',      r'\geq')
-        expr = expr.replace(r'\le',      r'\leq')
-        expr = expr.replace(r'\ne',      r'\neq')
-        # \text{} -> \mathrm{} (matplotlib ho tro mathrm tot hon)
-        expr = re.sub(r'\\text\{([^}]*)\}', r'\\mathrm{\1}', expr)
-        # Xoa cac lenh khong ho tro ma co the gay loi
+
+        # \xrightarrow{X} -> \xrightarrow{X} (matplotlib 3.5+ ho tro, nhung de an toan)
+        expr = re.sub(r'\\xrightarrow\{[^}]*\}', r'\\rightarrow', expr)
+        expr = re.sub(r'\\xleftarrow\{[^}]*\}',  r'\\leftarrow',  expr)
+        expr = re.sub(r'\\xleftrightarrow\{[^}]*\}', r'\\leftrightarrow', expr)
+        expr = re.sub(r'\\overset\{[^}]*\}\{([^}]*)\}', r'\1', expr)
+        expr = re.sub(r'\\underset\{[^}]*\}\{([^}]*)\}', r'\1', expr)
+        expr = re.sub(r'\\operatorname\{([^}]*)\}', r'\\mathrm{\1}', expr)
+        expr = re.sub(r'\\boldsymbol\{([^}]*)\}', r'\\mathbf{\1}', expr)
+        expr = re.sub(r'\\bm\{([^}]*)\}', r'\\mathbf{\1}', expr)
+
+        # Cac bien the ky hieu
+        expr = expr.replace(r'\implies',     r'\Rightarrow')
+        expr = expr.replace(r'\iff',         r'\Leftrightarrow')
+        expr = expr.replace(r'\ge ',         r'\geq ')
+        expr = expr.replace(r'\le ',         r'\leq ')
+        expr = expr.replace(r'\ne ',         r'\neq ')
+
+        # \text{} -> \mathrm{} nhung bo ky tu non-ASCII
+        def _fix_text(m):
+            inner = m.group(1)
+            inner_ascii = ''.join(c if ord(c) < 128 else '' for c in inner).strip()
+            if not inner_ascii:
+                return ''
+            return r'\mathrm{' + inner_ascii + '}'
+        expr = re.sub(r'\\text\{([^}]*)\}', _fix_text, expr)
+
+        # Xoa lenh khong ho tro
         expr = re.sub(r'\\label\{[^}]*\}', '', expr)
         expr = re.sub(r'\\tag\{[^}]*\}',   '', expr)
         expr = re.sub(r'\\nonumber',        '', expr)
         expr = re.sub(r'\\notag',           '', expr)
-        # \left( \right) duoc ho tro, giu nguyen
+        expr = re.sub(r'\\hline',           '', expr)
+        expr = re.sub(r'\\hdashline',       '', expr)
+        expr = re.sub(r'\\cline\{[^}]*\}',  '', expr)
+
         return expr.strip()
+
+    def _unicode_matrix(self, latex_str):
+        """
+        Parse moi truong ma tran (bmatrix, pmatrix, cases, matrix) va
+        tra ve chuoi Unicode text art, hoac None neu khong phai ma tran.
+        Ho tro nhieu ma tran/cases trong cung mot bieu thuc.
+        """
+        original_str = latex_str
+
+        def repl_cases(m):
+            content = m.group(1)
+            rows = [r.strip() for r in re.split(r'\\\\', content) if r.strip()]
+            def clean(s):
+                s = re.sub(r'\\[a-zA-Z]+', '', s)
+                s = re.sub(r'[{}]', '', s)
+                return s.strip()
+            lines = ['{ ' + clean(rows[0])] if rows else []
+            for r in rows[1:]:
+                lines.append('  ' + clean(r))
+            return '\n' + '\n'.join(lines) + '\n'
+
+        latex_str = re.sub(r'\\begin\s*\{cases\}(.*?)\\end\s*\{cases\}', repl_cases, latex_str, flags=re.DOTALL)
+
+        def repl_matrix(m):
+            env = m.group(1) or ''
+            body = m.group(2)
+            bk = {'b': ('\u23a1\u23a2\u23a3', '\u23a4\u23a5\u23a6'),
+                  'p': ('\u239b\u239c\u239d', '\u239e\u239f\u23a0'),
+                  'v': ('|', '|'), 'B': ('\u2016', '\u2016'),
+                  '' : ('',  '')}
+            lb_chars, rb_chars = bk.get(env, ('', ''))
+            rows_raw = re.split(r'\\\\', body)
+            cells = []
+            for row in rows_raw:
+                row = row.strip()
+                if not row: continue
+                cols = [c.strip() for c in row.split('&')]
+                cleaned = []
+                for c in cols:
+                    c = re.sub(r'\\frac\{([^}]*)\}\{([^}]*)\}', r'(\1)/(\2)', c)
+                    c = re.sub(r'\\[a-zA-Z]+', '', c)
+                    c = re.sub(r'[{}]', '', c)
+                    c = c.strip() or '0'
+                    cleaned.append(c)
+                cells.append(cleaned)
+            if not cells: return m.group(0)
+            ncols = max(len(r) for r in cells)
+            widths = [max((len(cells[i][j]) if j < len(cells[i]) else 0) for i in range(len(cells))) for j in range(ncols)]
+            lines = []
+            n = len(cells)
+            for i, row in enumerate(cells):
+                cols_str = '  '.join((row[j] if j < len(row) else '').center(widths[j]) for j in range(ncols))
+                if lb_chars and len(lb_chars) == 3:
+                    if n == 1: p, s = lb_chars[0], rb_chars[0]
+                    elif i == 0: p, s = lb_chars[0], rb_chars[0]
+                    elif i == n - 1: p, s = lb_chars[2], rb_chars[2]
+                    else: p, s = lb_chars[1], rb_chars[1]
+                    lines.append(f'{p} {cols_str} {s}')
+                elif lb_chars:
+                    lines.append(f'{lb_chars} {cols_str} {rb_chars}')
+                else:
+                    lines.append(f'  {cols_str}  ')
+            return '\n' + '\n'.join(lines) + '\n'
+
+        latex_str = re.sub(r'\\begin\s*\{(b|p|v|B|V|small)?matrix\}(.*?)\\end\s*\{(b|p|v|B|V|small)?matrix\}', repl_matrix, latex_str, flags=re.DOTALL)
+
+        if latex_str != original_str:
+            return latex_str.strip()
+        return None
 
     def render_latex_image(self, latex_str, display=False):
         """
@@ -1299,8 +1466,15 @@ class SystemAudioControl:
                     self.text_area.image_create(tk.END, image=tk_img, padx=10, pady=4)
                     self.text_area.insert(tk.END, '\n')
                 else:
-                    # Fallback: hiển thị text thô
-                    self.text_area.insert(tk.END, f'  [{part.strip()}]\n', 'code')
+                    # Fallback: thu render Unicode matrix truoc
+                    uni = self._unicode_matrix(part.strip())
+                    if uni:
+                        self.text_area.insert(tk.END, '\n', 'normal_text')
+                        for mline in uni.split('\n'):
+                            self.text_area.insert(tk.END, '  ' + mline + '\n', 'code')
+                    else:
+                        # Hien thi LaTeX source voi mau khac biet
+                        self.text_area.insert(tk.END, f'  {part.strip()}\n', 'code')
             else:
                 # Text thường — xử lý từng dòng
                 lines = part.split('\n')
@@ -1355,7 +1529,12 @@ class SystemAudioControl:
                             self.photo_images.append(img)
                             self.text_area.image_create(tk.END, image=img, pady=1)
                         else:
-                            self.text_area.insert(tk.END, f'${sval}$', 'bold')
+                            uni = self._unicode_matrix(sval)
+                            if uni:
+                                for ml in uni.split('\n'):
+                                    self.text_area.insert(tk.END, ml + ' ', 'code')
+                            else:
+                                self.text_area.insert(tk.END, f'${sval}$', 'bold')
                     else:
                         self.text_area.insert(tk.END, sval, 'bold')
             else:
@@ -1367,7 +1546,12 @@ class SystemAudioControl:
                             self.photo_images.append(img)
                             self.text_area.image_create(tk.END, image=img, pady=1)
                         else:
-                            self.text_area.insert(tk.END, f'${sval}$', base_tag)
+                            uni = self._unicode_matrix(sval)
+                            if uni:
+                                for ml in uni.split('\n'):
+                                    self.text_area.insert(tk.END, ml + ' ', 'code')
+                            else:
+                                self.text_area.insert(tk.END, f'${sval}$', base_tag)
                     else:
                         self.text_area.insert(tk.END, sval, base_tag)
         self.text_area.insert(tk.END, '\n')
@@ -1396,7 +1580,13 @@ class SystemAudioControl:
                     self.photo_images.append(img)
                     self.text_area.image_create(tk.END, image=img, pady=1)
                 else:
-                    self.text_area.insert(tk.END, part, 'normal_text')
+                    uni = self._unicode_matrix(expr)
+                    if uni:
+                        self.text_area.insert(tk.END, '\n', 'normal_text')
+                        for ml in uni.split('\n'):
+                            self.text_area.insert(tk.END, '  ' + ml + '\n', 'code')
+                    else:
+                        self.text_area.insert(tk.END, part, 'normal_text')
             else:
                 self.text_area.insert(tk.END, part, 'normal_text')
         self.text_area.insert(tk.END, '\n')
