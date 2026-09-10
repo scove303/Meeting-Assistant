@@ -867,7 +867,7 @@ class SystemAudioControl:
                 for attempt in range(max_retries):
                     try:
                         stream = self.client.chat.completions.create(
-                            model="llama-3.3-70b-versatile",
+                            model="openai/gpt-oss-20b",
                             messages=messages,
                             temperature=0.7,
                             max_tokens=4096,
@@ -1039,7 +1039,7 @@ class SystemAudioControl:
                 for attempt in range(max_retries):
                     try:
                         stream = self.client.chat.completions.create(
-                            model="llama-3.3-70b-versatile",
+                            model="openai/gpt-oss-20b",
                             messages=messages,
                             temperature=0.7,
                             max_tokens=4096,
@@ -1160,7 +1160,7 @@ class SystemAudioControl:
             for attempt in range(max_retries):
                 try:
                     stream = self.client.chat.completions.create(
-                        model="llama-3.3-70b-versatile",
+                        model="openai/gpt-oss-20b",
                         messages=messages,
                         temperature=0.7,
                         max_tokens=4096,
